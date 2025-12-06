@@ -155,7 +155,7 @@ export default function ManagerDashboard() {
   });
   const [isCredentialsModalOpen, setIsCredentialsModalOpen] = useState(false);
   const [isSignOutDialogOpen, setIsSignOutDialogOpen] = useState(false);
-  const [dateRangeFilter, setDateRangeFilter] = useState<'today' | 'week' | 'month' | 'custom'>('week');
+  const [dateRangeFilter, setDateRangeFilter] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('week');
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
@@ -193,31 +193,35 @@ export default function ManagerDashboard() {
     const date = new Date(dateString);
     const now = new Date();
     
+    // Always compare using UTC date components to avoid timezone issues
+    const dateUTC = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+    const nowUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    
     switch (dateRangeFilter) {
       case 'today':
-        // Compare dates in UTC to avoid timezone issues
-        const todayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-        const itemDateUTC = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
-        return itemDateUTC === todayUTC;
+        return dateUTC === nowUTC;
+      
+      case 'yesterday':
+        const yesterdayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1);
+        return dateUTC === yesterdayUTC;
       
       case 'week':
-        // Current week: Monday Nov 24 to Friday Nov 28, 2025 (weekdays only)
-        const currentWeekStart = Date.UTC(2025, 10, 24, 0, 0, 0); // Nov 24, 2025 (month is 0-indexed)
-        const currentWeekEnd = Date.UTC(2025, 10, 28, 23, 59, 59); // Nov 28, 2025
-        const dateUTC = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
-        return dateUTC >= currentWeekStart && dateUTC <= currentWeekEnd;
+        // Last 7 days including today
+        const weekAgoUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6);
+        return dateUTC >= weekAgoUTC && dateUTC <= nowUTC;
       
       case 'month':
-        const monthAgo = new Date(now);
-        monthAgo.setMonth(now.getMonth() - 1);
-        return date >= monthAgo && date <= now;
+        // Last 30 days including today
+        const monthAgoUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 29);
+        return dateUTC >= monthAgoUTC && dateUTC <= nowUTC;
       
       case 'custom':
         if (!customStartDate || !customEndDate) return true;
         const start = new Date(customStartDate);
         const end = new Date(customEndDate);
-        end.setHours(23, 59, 59, 999); // Include the entire end date
-        return date >= start && date <= end;
+        const startUTC = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+        const endUTC = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
+        return dateUTC >= startUTC && dateUTC <= endUTC;
       
       default:
         return true;
@@ -226,7 +230,7 @@ export default function ManagerDashboard() {
 
   // Filter data based on date range for overview tab
   const dateFilteredCallOutcomes = callOutcomes.filter(outcome => isDateInRange(outcome.call_date || outcome.created_at));
-  const dateFilteredCalls = calls.filter(call => isDateInRange(call.created_at));
+  const dateFilteredCalls = calls.filter(call => isDateInRange(call.call_date || call.created_at));
   const dateFilteredAnalyses = analyses.filter(analysis => isDateInRange(analysis.created_at));
 
   const fetchData = async () => {
@@ -1091,6 +1095,13 @@ export default function ManagerDashboard() {
                         Today
                       </Button>
                       <Button 
+                        variant={dateRangeFilter === 'yesterday' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setDateRangeFilter('yesterday')}
+                      >
+                        Yesterday
+                      </Button>
+                      <Button 
                         variant={dateRangeFilter === 'week' ? 'default' : 'outline'}
                         size="sm"
                         onClick={() => setDateRangeFilter('week')}
@@ -1135,20 +1146,13 @@ export default function ManagerDashboard() {
 
               {/* Top Metrics Row */}
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                {/* Total Open Positions */}
+                {/* Total Jobs */}
                 <Card className="bg-blue-100">
                   <CardContent className="pt-6 text-center">
                     <div className="text-4xl font-bold">
-                      {(() => {
-                        // Calculate total openings from assigned clients
-                        if (!assignedClients || assignedClients.length === 0) return 0;
-                        // Each client has 5 jobs with 15 positions each = 75 per client
-                        return assignedClients.length * 75;
-                      })()}
+                      {jobs.length}
                     </div>
-                    <p className="text-sm text-muted-foreground mt-2">
-                      {company?.industry?.toLowerCase() === 'hr' ? 'Total Openings' : 'Total Openings'}
-                    </p>
+                    <p className="text-sm text-muted-foreground mt-2">Total Jobs</p>
                   </CardContent>
                 </Card>
 
@@ -1339,25 +1343,19 @@ export default function ManagerDashboard() {
                       </Card>
                       <Card>
                         <CardContent className="pt-6 text-center">
-                          <div className="text-4xl font-bold text-green-600">
-                            {new Set(dateFilteredCalls.filter(c => c.outcome === 'converted').map(c => c.lead_id)).size}
-                          </div>
+                          <div className="text-4xl font-bold text-gray-400">--</div>
                           <p className="text-sm text-muted-foreground mt-2">Converted</p>
                         </CardContent>
                       </Card>
                       <Card>
                         <CardContent className="pt-6 text-center">
-                          <div className="text-4xl font-bold text-orange-600">
-                            {new Set(dateFilteredCalls.filter(c => c.outcome === 'follow_up').map(c => c.lead_id)).size}
-                          </div>
+                          <div className="text-4xl font-bold text-gray-400">--</div>
                           <p className="text-sm text-muted-foreground mt-2">Pending</p>
                         </CardContent>
                       </Card>
                       <Card>
                         <CardContent className="pt-6 text-center">
-                          <div className="text-4xl font-bold text-red-600">
-                            {new Set(dateFilteredCalls.filter(c => c.outcome === 'rejected').map(c => c.lead_id)).size}
-                          </div>
+                          <div className="text-4xl font-bold text-gray-400">--</div>
                           <p className="text-sm text-muted-foreground mt-2">Rejected</p>
                         </CardContent>
                       </Card>
@@ -1377,33 +1375,33 @@ export default function ManagerDashboard() {
                       <Card>
                         <CardContent className="pt-6 text-center">
                           <div className="text-4xl font-bold text-green-600">
-                            {dateFilteredCalls.filter(c => c.outcome === 'converted').length}
+                            {dateFilteredCalls.filter(c => c.outcome === 'completed').length}
                           </div>
-                          <p className="text-sm text-muted-foreground mt-2">Converted</p>
+                          <p className="text-sm text-muted-foreground mt-2">Contacted</p>
                         </CardContent>
                       </Card>
                       <Card>
                         <CardContent className="pt-6 text-center">
                           <div className="text-4xl font-bold text-blue-600">
-                            {dateFilteredCalls.filter(c => c.outcome === 'follow_up').length}
+                            {dateFilteredCalls.filter(c => c.outcome === 'no-answer').length}
                           </div>
-                          <p className="text-sm text-muted-foreground mt-2">Follow-up</p>
-                        </CardContent>
-                      </Card>
-                      <Card>
-                        <CardContent className="pt-6 text-center">
-                          <div className="text-4xl font-bold text-orange-600">
-                            {dateFilteredCalls.filter(c => c.outcome === 'rejected').length}
-                          </div>
-                          <p className="text-sm text-muted-foreground mt-2">Rejected</p>
+                          <p className="text-sm text-muted-foreground mt-2">Follow-Ups</p>
                         </CardContent>
                       </Card>
                       <Card>
                         <CardContent className="pt-6 text-center">
                           <div className="text-4xl font-bold text-red-600">
-                            {dateFilteredCalls.filter(c => c.outcome === 'not_answered').length}
+                            {dateFilteredCalls.filter(c => c.outcome === 'Failed').length}
                           </div>
-                          <p className="text-sm text-muted-foreground mt-2">Not Answered</p>
+                          <p className="text-sm text-muted-foreground mt-2">Failed</p>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="pt-6 text-center">
+                          <div className="text-4xl font-bold text-orange-600">
+                            {dateFilteredCalls.filter(c => c.outcome === 'busy').length}
+                          </div>
+                          <p className="text-sm text-muted-foreground mt-2">Busy</p>
                         </CardContent>
                       </Card>
                     </div>
@@ -1411,9 +1409,8 @@ export default function ManagerDashboard() {
                 </div>
               </div>
 
-              {/* Team Performance and Client Performance Side by Side */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
-                {/* Team Performance Table */}
+              {/* Team Performance - Full Width */}
+              <div className="mt-8">
                 <Card>
                   <CardHeader>
                     <CardTitle>Team Performance</CardTitle>
@@ -1424,138 +1421,89 @@ export default function ManagerDashboard() {
                         <thead>
                           <tr className="border-b">
                             <th className="text-left py-2 px-2 font-medium">Team Member</th>
-                            <th className="text-right py-2 px-2 font-medium">Calls</th>
-                            <th className="text-right py-2 px-2 font-medium">Completed</th>
-                            <th className="text-right py-2 px-2 font-medium">Missed</th>
-                            <th className="text-right py-2 px-2 font-medium">Rate</th>
+                            <th className="text-right py-2 px-2 font-medium">Total Calls</th>
+                            <th className="text-right py-2 px-2 font-medium">Contacted</th>
+                            <th className="text-right py-2 px-2 font-medium">Not Answered</th>
+                            <th className="text-right py-2 px-2 font-medium">Failed</th>
+                            <th className="text-right py-2 px-2 font-medium">Busy</th>
+                            <th className="text-right py-2 px-2 font-medium">Total Duration</th>
+                            <th className="text-right py-2 px-2 font-medium">Avg. Talk Time</th>
                           </tr>
                         </thead>
                         <tbody>
                           {employees.filter(emp => emp.user_id !== userRole?.user_id).map((emp) => {
                             const empCalls = dateFilteredCalls.filter(c => c.employee_id === emp.user_id);
-                            const completedCalls = empCalls.filter(c => c.outcome === 'converted');
-                            const missedCalls = empCalls.filter(c => c.outcome === 'not_answered');
-                            const rate = empCalls.length > 0 ? Math.round((completedCalls.length / empCalls.length) * 100) : 0;
+                            const contactedCalls = empCalls.filter(c => c.outcome === 'completed');
+                            const notAnsweredCalls = empCalls.filter(c => c.outcome === 'no-answer');
+                            const failedCalls = empCalls.filter(c => c.outcome === 'Failed');
+                            const busyCalls = empCalls.filter(c => c.outcome === 'busy');
+                            
+                            // Calculate total duration (in seconds) using exotel_duration, excluding calls below 60 seconds
+                            const validCalls = empCalls.filter(call => (call.exotel_duration || 0) >= 60);
+                            const totalDuration = validCalls.reduce((sum, call) => sum + (call.exotel_duration || 0), 0);
+                            // Format as HH:MM:SS
+                            const hours = Math.floor(totalDuration / 3600);
+                            const minutes = Math.floor((totalDuration % 3600) / 60);
+                            const seconds = totalDuration % 60;
+                            const formattedDuration = `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                            
+                            // Calculate average talk time (in seconds) only for calls >= 60 seconds
+                            const avgTalkTime = validCalls.length > 0 ? Math.round(totalDuration / validCalls.length) : 0;
+                            const avgMinutes = Math.floor(avgTalkTime / 60);
+                            const avgSeconds = avgTalkTime % 60;
+                            const formattedAvgTime = `${avgMinutes}:${avgSeconds.toString().padStart(2, '0')}`;
                             
                             return (
                               <tr key={emp.id} className="border-b hover:bg-muted/50">
                                 <td className="py-3 px-2">{emp.full_name}</td>
                                 <td className="text-right py-3 px-2">{empCalls.length}</td>
-                                <td className="text-right py-3 px-2">{completedCalls.length}</td>
-                                <td className="text-right py-3 px-2">{missedCalls.length}</td>
-                                <td className="text-right py-3 px-2">{rate}%</td>
+                                <td className="text-right py-3 px-2 text-green-600">{contactedCalls.length}</td>
+                                <td className="text-right py-3 px-2 text-blue-600">{notAnsweredCalls.length}</td>
+                                <td className="text-right py-3 px-2 text-red-600">{failedCalls.length}</td>
+                                <td className="text-right py-3 px-2 text-orange-600">{busyCalls.length}</td>
+                                <td className="text-right py-3 px-2 font-medium">{formattedDuration}</td>
+                                <td className="text-right py-3 px-2 font-medium">{formattedAvgTime}</td>
                               </tr>
                             );
                           })}
                           {employees.length > 0 && (() => {
                             const totalCalls = dateFilteredCalls.length;
-                            const totalCompleted = dateFilteredCalls.filter(c => c.outcome === 'converted').length;
-                            const totalMissed = dateFilteredCalls.filter(c => c.outcome === 'not_answered').length;
-                            const totalRate = totalCalls > 0 ? Math.round((totalCompleted / totalCalls) * 100) : 0;
+                            const totalContacted = dateFilteredCalls.filter(c => c.outcome === 'completed').length;
+                            const totalNotAnswered = dateFilteredCalls.filter(c => c.outcome === 'no-answer').length;
+                            const totalFailed = dateFilteredCalls.filter(c => c.outcome === 'Failed').length;
+                            const totalBusy = dateFilteredCalls.filter(c => c.outcome === 'busy').length;
+                            
+                            // Calculate total duration across all employees using exotel_duration, excluding calls below 60 seconds
+                            const grandValidCalls = dateFilteredCalls.filter(call => (call.exotel_duration || 0) >= 60);
+                            const grandTotalDuration = grandValidCalls.reduce((sum, call) => sum + (call.exotel_duration || 0), 0);
+                            const grandHours = Math.floor(grandTotalDuration / 3600);
+                            const grandMinutes = Math.floor((grandTotalDuration % 3600) / 60);
+                            const grandSeconds = grandTotalDuration % 60;
+                            const grandFormattedDuration = `${grandHours}:${grandMinutes.toString().padStart(2, '0')}:${grandSeconds.toString().padStart(2, '0')}`;
+                            
+                            // Calculate average talk time across all calls >= 60 seconds
+                            const grandAvgTalkTime = grandValidCalls.length > 0 ? Math.round(grandTotalDuration / grandValidCalls.length) : 0;
+                            const grandAvgMinutes = Math.floor(grandAvgTalkTime / 60);
+                            const grandAvgSeconds = grandAvgTalkTime % 60;
+                            const grandFormattedAvgTime = `${grandAvgMinutes}:${grandAvgSeconds.toString().padStart(2, '0')}`;
                             
                             return (
                               <tr className="border-t-2 font-bold bg-muted/30">
                                 <td className="py-3 px-2">Total</td>
                                 <td className="text-right py-3 px-2">{totalCalls}</td>
-                                <td className="text-right py-3 px-2">{totalCompleted}</td>
-                                <td className="text-right py-3 px-2">{totalMissed}</td>
-                                <td className="text-right py-3 px-2">{totalRate}%</td>
+                                <td className="text-right py-3 px-2 text-green-600">{totalContacted}</td>
+                                <td className="text-right py-3 px-2 text-blue-600">{totalNotAnswered}</td>
+                                <td className="text-right py-3 px-2 text-red-600">{totalFailed}</td>
+                                <td className="text-right py-3 px-2 text-orange-600">{totalBusy}</td>
+                                <td className="text-right py-3 px-2">{grandFormattedDuration}</td>
+                                <td className="text-right py-3 px-2">{grandFormattedAvgTime}</td>
                               </tr>
                             );
                           })()}
                           {employees.length === 0 && (
                             <tr>
-                              <td colSpan={5} className="text-center py-8 text-muted-foreground">
+                              <td colSpan={8} className="text-center py-8 text-muted-foreground">
                                 No team members found
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Client Performance */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Client Performance</CardTitle>
-                    <CardDescription>Openings and conversion rates by client</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead>
-                          <tr className="border-b">
-                            <th className="text-left py-3 px-4 font-medium">Company</th>
-                            <th className="text-right py-3 px-4 font-medium">Total Openings</th>
-                            <th className="text-right py-3 px-4 font-medium">Filled</th>
-                            <th className="text-right py-3 px-4 font-medium">Remaining</th>
-                            <th className="text-right py-3 px-4 font-medium">Conversion %</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {assignedClients.map(client => {
-                            // Get all jobs for this client
-                            const clientJobs = jobs.filter(j => j.client_id === client.id);
-                            const totalOpenings = clientJobs.reduce((sum, job) => sum + (job.positions_available || 0), 0);
-                            
-                            // Get conversions for this client from call_history
-                            const clientLeads = allLeads?.filter(l => l.client_id === client.id) || [];
-                            const clientLeadIds = clientLeads.map(l => l.id);
-                            const clientConversions = dateFilteredCalls.filter(c => 
-                              clientLeadIds.includes(c.lead_id) && c.outcome === 'converted'
-                            ).length;
-                            
-                            const remaining = totalOpenings - clientConversions;
-                            const conversionPercentage = totalOpenings > 0 
-                              ? ((clientConversions / totalOpenings) * 100).toFixed(1)
-                              : '0.0';
-                            
-                            return (
-                              <tr key={client.id} className="border-b hover:bg-muted/50">
-                                <td className="py-3 px-4 font-medium">{client.name}</td>
-                                <td className="text-right py-3 px-4">{totalOpenings}</td>
-                                <td className="text-right py-3 px-4 text-green-600 font-medium">{clientConversions}</td>
-                                <td className="text-right py-3 px-4 text-orange-600">{remaining}</td>
-                                <td className="text-right py-3 px-4">
-                                  <Badge variant={parseFloat(conversionPercentage) >= 50 ? "default" : "secondary"}>
-                                    {conversionPercentage}%
-                                  </Badge>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                          {assignedClients.length > 0 && (() => {
-                            // Calculate totals across all clients
-                            const grandTotalOpenings = jobs.reduce((sum, job) => sum + (job.positions_available || 0), 0);
-                            const allClientLeadIds = allLeads?.filter(l => assignedClients.some(c => c.id === l.client_id)).map(l => l.id) || [];
-                            const grandTotalFilled = dateFilteredCalls.filter(c => 
-                              allClientLeadIds.includes(c.lead_id) && c.outcome === 'converted'
-                            ).length;
-                            const grandTotalRemaining = grandTotalOpenings - grandTotalFilled;
-                            const grandTotalPercentage = grandTotalOpenings > 0 
-                              ? ((grandTotalFilled / grandTotalOpenings) * 100).toFixed(1)
-                              : '0.0';
-                            
-                            return (
-                              <tr className="border-t-2 font-bold bg-muted/30">
-                                <td className="py-3 px-4">Total</td>
-                                <td className="text-right py-3 px-4">{grandTotalOpenings}</td>
-                                <td className="text-right py-3 px-4 text-green-600">{grandTotalFilled}</td>
-                                <td className="text-right py-3 px-4 text-orange-600">{grandTotalRemaining}</td>
-                                <td className="text-right py-3 px-4">
-                                  <Badge variant={parseFloat(grandTotalPercentage) >= 50 ? "default" : "secondary"}>
-                                    {grandTotalPercentage}%
-                                  </Badge>
-                                </td>
-                              </tr>
-                            );
-                          })()}
-                          {assignedClients.length === 0 && (
-                            <tr>
-                              <td colSpan={5} className="text-center py-8 text-muted-foreground">
-                                No clients assigned
                               </td>
                             </tr>
                           )}
@@ -2321,6 +2269,14 @@ export default function ManagerDashboard() {
             <TabsContent value="reports" className="space-y-6">
               <ManagerReportsPage />
             </TabsContent>
+
+            {(() => {
+              console.log('ManagerDashboard - company:', company);
+              console.log('ManagerDashboard - manager:', manager);
+              console.log('ManagerDashboard - manager?.id:', manager?.id);
+              console.log('ManagerDashboard - company?.industry:', company?.industry);
+              return null;
+            })()}
 
             {company?.industry?.toLowerCase() === 'hr' && (
               <>

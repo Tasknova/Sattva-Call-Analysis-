@@ -24,7 +24,7 @@ import {
 export default function EmployeeReportsPage() {
   const { userRole } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [timePeriod, setTimePeriod] = useState<'daily' | 'monthly' | 'custom'>('monthly');
+  const [timePeriod, setTimePeriod] = useState<'today' | 'week' | 'month' | 'custom'>('today');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [customFromDate, setCustomFromDate] = useState(new Date().toISOString().split('T')[0]);
   const [customToDate, setCustomToDate] = useState(new Date().toISOString().split('T')[0]);
@@ -38,33 +38,40 @@ export default function EmployeeReportsPage() {
   }, [userRole, timePeriod, selectedDate, customFromDate, customToDate]);
 
   const getDateRange = () => {
-    let startDate: Date;
-    let endDate: Date;
+    const now = new Date();
+    let startDateStr: string;
+    let endDateStr: string;
 
     if (timePeriod === 'custom') {
-      // Use custom date range
-      startDate = new Date(customFromDate);
-      startDate.setHours(0, 0, 0, 0);
-      endDate = new Date(customToDate);
-      endDate.setHours(23, 59, 59, 999);
-    } else if (timePeriod === 'daily') {
-      // Single day
-      const date = new Date(selectedDate);
-      startDate = new Date(date);
-      startDate.setHours(0, 0, 0, 0);
-      endDate = new Date(date);
-      endDate.setHours(23, 59, 59, 999);
+      // Use custom date range - just the date part
+      startDateStr = customFromDate;
+      endDateStr = customToDate;
+    } else if (timePeriod === 'today') {
+      // Today only - just the date part
+      const todayStr = now.toISOString().split('T')[0];
+      startDateStr = todayStr;
+      endDateStr = todayStr;
+    } else if (timePeriod === 'week') {
+      // This week (Monday to Friday)
+      const dayOfWeek = now.getDay();
+      const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - daysFromMonday);
+      startDateStr = monday.toISOString().split('T')[0];
+      
+      const friday = new Date(monday);
+      friday.setDate(monday.getDate() + 4);
+      endDateStr = friday.toISOString().split('T')[0];
     } else {
-      // Monthly - last 30 days
-      const date = new Date(selectedDate);
-      endDate = new Date(date);
-      endDate.setHours(23, 59, 59, 999);
-      startDate = new Date(date);
-      startDate.setDate(date.getDate() - 30);
-      startDate.setHours(0, 0, 0, 0);
+      // This month
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+      startDateStr = firstDay.toISOString().split('T')[0];
+      
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      endDateStr = lastDay.toISOString().split('T')[0];
     }
 
-    return { startDate: startDate.toISOString(), endDate: endDate.toISOString() };
+    return { startDate: startDateStr, endDate: endDateStr };
   };
 
   const fetchReportData = async () => {
@@ -82,12 +89,9 @@ export default function EmployeeReportsPage() {
       console.log('Fetching report data for employee user_id:', userRole.user_id);
       console.log('Company ID:', userRole.company_id);
       console.log('Time Period:', timePeriod);
-      console.log('Selected Date:', selectedDate);
-      console.log('Date range:', { 
+      console.log('Date range (YYYY-MM-DD):', { 
         startDate, 
-        endDate,
-        startDateLocal: new Date(startDate).toLocaleString(),
-        endDateLocal: new Date(endDate).toLocaleString()
+        endDate
       });
       
       // Verify employee exists in database
@@ -103,13 +107,11 @@ export default function EmployeeReportsPage() {
         console.log('Employee data:', employeeData);
       }
 
-      // Fetch calls for the period (without leads join first)
+      // Fetch all calls for this employee (same as dashboard)
       const { data: callsData, error: callsError } = await supabase
         .from('call_history')
         .select('*')
         .eq('employee_id', userRole.user_id)
-        .gte('created_at', startDate)
-        .lte('created_at', endDate)
         .order('created_at', { ascending: false });
 
       if (callsError) {
@@ -117,17 +119,27 @@ export default function EmployeeReportsPage() {
         throw callsError;
       }
       
-      console.log('Calls fetched:', callsData?.length || 0);
-      console.log('Call details:', callsData?.map(c => ({
-        id: c.id,
-        lead_id: c.lead_id,
-        outcome: c.outcome,
-        created_at: c.created_at,
-        created_at_local: new Date(c.created_at).toLocaleString()
-      })));
+      console.log('All calls fetched:', callsData?.length || 0);
+      console.log('Filtering by date range:', { startDate, endDate });
+      
+      // Filter calls by date range client-side
+      const filteredCallsData = callsData?.filter(call => {
+        if (!call.call_date) {
+          console.log('Call without date:', call.id);
+          return false;
+        }
+        const callDate = new Date(call.call_date);
+        const callDateStr = callDate.toISOString().split('T')[0];
+        const matches = callDateStr >= startDate && callDateStr <= endDate;
+        console.log(`Call ${call.id}: date=${callDateStr}, matches=${matches}`);
+        return matches;
+      }) || [];
+      
+      console.log('Calls after date filter:', filteredCallsData.length);
+      console.log('Filtered call outcomes:', filteredCallsData.map(c => c.outcome));
       
       // Fetch lead details separately for better error handling
-      const leadIds = callsData?.map(c => c.lead_id).filter(Boolean) || [];
+      const leadIds = filteredCallsData.map(c => c.lead_id).filter(Boolean);
       let leadsMap = new Map();
       
       if (leadIds.length > 0) {
@@ -147,18 +159,16 @@ export default function EmployeeReportsPage() {
       }
       
       // Attach lead info to calls
-      const callsWithLeads = callsData?.map(call => ({
+      const callsWithLeads = filteredCallsData.map(call => ({
         ...call,
         leads: call.lead_id ? leadsMap.get(call.lead_id) : null
-      })) || [];
+      }));
 
-      // Fetch analyses for the period through recordings
+      // Fetch all analyses for the employee
       const { data: analysesData, error: analysesError } = await supabase
         .from('analyses')
         .select('*')
-        .eq('user_id', userRole.user_id)
-        .gte('created_at', startDate)
-        .lte('created_at', endDate);
+        .eq('user_id', userRole.user_id);
 
       if (analysesError) {
         console.error('Error fetching analyses:', analysesError);
@@ -167,18 +177,18 @@ export default function EmployeeReportsPage() {
       console.log('Analyses fetched:', analysesData?.length || 0);
 
       // Calculate performance metrics
-      const totalCalls = callsWithLeads?.length || 0;
-      const completedCalls = callsWithLeads?.filter(c => c.outcome === 'completed' || c.outcome === 'converted').length || 0;
-      const followUpCalls = callsWithLeads?.filter(c => c.outcome === 'follow_up').length || 0;
-      const notInterestedCalls = callsWithLeads?.filter(c => c.outcome === 'not_interested' || c.outcome === 'rejected').length || 0;
-      const notAnsweredCalls = callsWithLeads?.filter(c => c.outcome === 'not_answered').length || 0;
+      const totalCalls = callsWithLeads.length;
+      const completedCalls = callsWithLeads.filter(c => c.outcome === 'completed').length;
+      const notAnsweredCalls = callsWithLeads.filter(c => c.outcome === 'no-answer').length;
+      const failedCalls = callsWithLeads.filter(c => c.outcome === 'Failed').length;
+      const busyCalls = callsWithLeads.filter(c => c.outcome === 'busy').length;
 
       console.log('Total calls in period:', totalCalls);
       console.log('Completed calls:', completedCalls);
-      console.log('Follow-up calls:', followUpCalls);
-      console.log('Not interested calls:', notInterestedCalls);
       console.log('Not answered calls:', notAnsweredCalls);
-      console.log('All calls outcomes:', callsWithLeads?.map(c => c.outcome));
+      console.log('Failed calls:', failedCalls);
+      console.log('Busy calls:', busyCalls);
+      console.log('All calls outcomes:', callsWithLeads.map(c => c.outcome));
 
       const completedAnalyses = (analysesData || []);
       
@@ -201,9 +211,9 @@ export default function EmployeeReportsPage() {
       const perfData = {
         total_calls: totalCalls,
         completed_calls: completedCalls,
-        follow_up_calls: followUpCalls,
-        not_interested_calls: notInterestedCalls,
         not_answered_calls: notAnsweredCalls,
+        failed_calls: failedCalls,
+        busy_calls: busyCalls,
         conversion_rate: totalCalls > 0 ? ((completedCalls / totalCalls) * 100).toFixed(1) : 0,
         avg_closure_probability: avgClosureProbability,
         avg_candidate_risk: avgCandidateRisk,
@@ -292,13 +302,14 @@ export default function EmployeeReportsPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="daily">Daily</SelectItem>
-                  <SelectItem value="monthly">Monthly (Last 30 days)</SelectItem>
+                  <SelectItem value="today">Today</SelectItem>
+                  <SelectItem value="week">This Week</SelectItem>
+                  <SelectItem value="month">This Month</SelectItem>
                   <SelectItem value="custom">Custom Range</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            {timePeriod === 'custom' ? (
+            {timePeriod === 'custom' && (
               <>
                 <div className="flex-1">
                   <label className="text-sm font-medium mb-2 block">From Date</label>
@@ -322,19 +333,6 @@ export default function EmployeeReportsPage() {
                   />
                 </div>
               </>
-            ) : (
-              <div className="flex-1">
-                <label className="text-sm font-medium mb-2 block">
-                  {timePeriod === 'daily' ? 'Select Date' : 'End Date (Last 30 days)'}
-                </label>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  max={new Date().toISOString().split('T')[0]}
-                />
-              </div>
             )}
           </div>
         </CardContent>
@@ -381,45 +379,45 @@ export default function EmployeeReportsPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Completed</CardTitle>
+            <CardTitle className="text-sm font-medium">Calls Connected</CardTitle>
             <CheckCircle className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">{performanceData?.completed_calls || 0}</div>
-            <p className="text-xs text-green-600 mt-1">Successful</p>
+            <p className="text-xs text-green-600 mt-1">Completed</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Not Answered</CardTitle>
-            <XCircle className="h-4 w-4 text-gray-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-gray-600">{performanceData?.not_answered_calls || 0}</div>
-            <p className="text-xs text-gray-600 mt-1">Missed calls</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Follow-ups</CardTitle>
+            <CardTitle className="text-sm font-medium">Not Answered (FollowUps)</CardTitle>
             <Clock className="h-4 w-4 text-orange-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-orange-600">{performanceData?.follow_up_calls || 0}</div>
-            <p className="text-xs text-orange-600 mt-1">Need retry</p>
+            <div className="text-2xl font-bold text-orange-600">{performanceData?.not_answered_calls || 0}</div>
+            <p className="text-xs text-orange-600 mt-1">Follow-ups</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Not Interested</CardTitle>
+            <CardTitle className="text-sm font-medium">Failed</CardTitle>
             <XCircle className="h-4 w-4 text-red-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">{performanceData?.not_interested_calls || 0}</div>
-            <p className="text-xs text-red-600 mt-1">Rejected</p>
+            <div className="text-2xl font-bold text-red-600">{performanceData?.failed_calls || 0}</div>
+            <p className="text-xs text-red-600 mt-1">Failed calls</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Busy</CardTitle>
+            <XCircle className="h-4 w-4 text-gray-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-gray-600">{performanceData?.busy_calls || 0}</div>
+            <p className="text-xs text-gray-600 mt-1">Line busy</p>
           </CardContent>
         </Card>
       </div>
@@ -466,76 +464,6 @@ export default function EmployeeReportsPage() {
         </CardContent>
       </Card>
 
-      {/* Call Breakdown Progress Bars */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Call Outcomes Breakdown</CardTitle>
-          <CardDescription>Visual representation of your call outcomes</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <div className="flex justify-between mb-2">
-              <span className="text-sm font-medium">Completed / Converted</span>
-              <span className="text-sm text-green-600 font-bold">{performanceData?.completed_calls || 0} ({performanceData?.conversion_rate || 0}%)</span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-3">
-              <div 
-                className="bg-green-600 h-3 rounded-full transition-all" 
-                style={{ width: `${performanceData?.conversion_rate || 0}%` }}
-              ></div>
-            </div>
-          </div>
-
-          <div>
-            <div className="flex justify-between mb-2">
-              <span className="text-sm font-medium">Follow-up Required</span>
-              <span className="text-sm text-orange-600 font-bold">
-                {performanceData?.follow_up_calls || 0} 
-                ({performanceData?.total_calls > 0 ? ((performanceData.follow_up_calls / performanceData.total_calls) * 100).toFixed(1) : 0}%)
-              </span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-3">
-              <div 
-                className="bg-orange-600 h-3 rounded-full transition-all" 
-                style={{ width: `${performanceData?.total_calls > 0 ? ((performanceData.follow_up_calls / performanceData.total_calls) * 100) : 0}%` }}
-              ></div>
-            </div>
-          </div>
-
-          <div>
-            <div className="flex justify-between mb-2">
-              <span className="text-sm font-medium">Not Interested</span>
-              <span className="text-sm text-red-600 font-bold">
-                {performanceData?.not_interested_calls || 0} 
-                ({performanceData?.total_calls > 0 ? ((performanceData.not_interested_calls / performanceData.total_calls) * 100).toFixed(1) : 0}%)
-              </span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-3">
-              <div 
-                className="bg-red-600 h-3 rounded-full transition-all" 
-                style={{ width: `${performanceData?.total_calls > 0 ? ((performanceData.not_interested_calls / performanceData.total_calls) * 100) : 0}%` }}
-              ></div>
-            </div>
-          </div>
-
-          <div>
-            <div className="flex justify-between mb-2">
-              <span className="text-sm font-medium">Not Answered</span>
-              <span className="text-sm text-gray-600 font-bold">
-                {performanceData?.not_answered_calls || 0} 
-                ({performanceData?.total_calls > 0 ? ((performanceData.not_answered_calls / performanceData.total_calls) * 100).toFixed(1) : 0}%)
-              </span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-3">
-              <div 
-                className="bg-gray-600 h-3 rounded-full transition-all" 
-                style={{ width: `${performanceData?.total_calls > 0 ? ((performanceData.not_answered_calls / performanceData.total_calls) * 100) : 0}%` }}
-              ></div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Recent Calls */}
       <Card>
         <CardHeader>
@@ -547,7 +475,7 @@ export default function EmployeeReportsPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {callsBreakdown.slice(0, 10).map(call => (
+            {callsBreakdown.slice(0, 5).map(call => (
               <div key={call.id} className="flex items-center justify-between p-3 border rounded-lg">
                 <div className="flex-1">
                   <p className="font-medium">{call.leads?.name || 'Lead'}</p>

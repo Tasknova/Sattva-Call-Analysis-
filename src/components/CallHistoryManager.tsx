@@ -648,8 +648,8 @@ export default function CallHistoryManager({ companyId, managerId }: CallHistory
       matchesAnalysisStatus = analysis && analysis.status?.toLowerCase() === 'completed';
     } else if (selectedAnalysisStatus === "not_analyzed") {
       // Only show answered calls (completed/converted) that are not analyzed
-      // Exclude no_answer and failed calls
-      const isAnsweredCall = call.outcome !== 'no_answer' && call.outcome !== 'failed';
+      // Exclude no-answer and Failed calls
+      const isAnsweredCall = call.outcome !== 'no-answer' && call.outcome !== 'Failed';
       const hasNoCompletedAnalysis = !analysis || analysis.status?.toLowerCase() !== 'completed';
       matchesAnalysisStatus = isAnsweredCall && hasNoCompletedAnalysis;
     }
@@ -896,6 +896,8 @@ export default function CallHistoryManager({ companyId, managerId }: CallHistory
             >
               <option value="all">All Outcomes</option>
               <option value="completed">Completed</option>
+              <option value="no-answer">No Answer</option>
+              <option value="Failed">Failed</option>
               <option value="follow_up">Follow-up</option>
               <option value="not_interested">Not Interested</option>
             </select>
@@ -946,12 +948,12 @@ export default function CallHistoryManager({ companyId, managerId }: CallHistory
                   <div key={call.id} className="flex items-center justify-between p-4 border rounded-lg">
                     <div className="flex items-center space-x-4">
                       <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                        call.outcome === 'no_answer' 
+                        call.outcome === 'no-answer' 
                           ? 'bg-red-100' 
                           : 'bg-blue-100'
                       }`}>
                         <Phone className={`h-5 w-5 ${
-                          call.outcome === 'no_answer' 
+                          call.outcome === 'no-answer' 
                             ? 'text-red-600' 
                             : 'text-blue-600'
                         }`} />
@@ -968,7 +970,7 @@ export default function CallHistoryManager({ companyId, managerId }: CallHistory
                               Manager: {call.employees.managers.full_name}
                             </Badge>
                           )}
-                          {call.outcome === 'no_answer' && (
+                          {call.outcome === 'no-answer' && (
                             <Badge variant="destructive" className="text-xs">Not Answered</Badge>
                           )}
                           {(call.next_follow_up || call.outcome === 'follow_up') && (

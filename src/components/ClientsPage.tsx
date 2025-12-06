@@ -56,16 +56,23 @@ export default function ClientsPage({ managerId }: ClientsPageProps = {}) {
   const { data: allClients, isLoading, error } = useClients();
   const { data: assignments, isLoading: assignmentsLoading } = useManagerClientAssignments(managerId);
   
+  console.log('ClientsPage - managerId:', managerId);
+  console.log('ClientsPage - allClients:', allClients);
+  console.log('ClientsPage - assignments:', assignments);
+  console.log('ClientsPage - assignmentsLoading:', assignmentsLoading);
+  console.log('ClientsPage - isLoading:', isLoading);
+  console.log('ClientsPage - error:', error);
+  
   // Filter clients based on managerId if provided
   const clients = managerId 
     ? allClients?.filter(client => {
-        console.log('Checking client:', client.id, 'Assignments:', assignments);
         return assignments?.some(assignment => {
-          console.log('Comparing:', assignment.client_id, 'with', client.id);
           return assignment.client_id === client.id;
         });
       })
     : allClients;
+  
+  console.log('ClientsPage - filtered clients:', clients);
   const createClient = useCreateClient();
   const updateClient = useUpdateClient();
   const deleteClient = useDeleteClient();

@@ -64,10 +64,17 @@ export default function JobsPage({ managerId }: JobsPageProps = {}) {
   const { data: allClients } = useClients();
   const { data: assignments } = useManagerClientAssignments(managerId);
   
+  console.log('JobsPage - managerId:', managerId);
+  console.log('JobsPage - allJobs:', allJobs);
+  console.log('JobsPage - allClients:', allClients);
+  console.log('JobsPage - assignments:', assignments);
+  
   // Filter clients and jobs based on managerId if provided
   const assignedClientIds = managerId 
     ? assignments?.map(assignment => assignment.client_id) || []
     : [];
+  
+  console.log('JobsPage - assignedClientIds:', assignedClientIds);
   
   const clients = managerId 
     ? allClients?.filter(client => assignedClientIds.includes(client.id))
@@ -76,6 +83,9 @@ export default function JobsPage({ managerId }: JobsPageProps = {}) {
   const jobs = managerId 
     ? allJobs?.filter(job => assignedClientIds.includes(job.client_id))
     : allJobs;
+  
+  console.log('JobsPage - filtered clients:', clients);
+  console.log('JobsPage - filtered jobs:', jobs);
   const createJob = useCreateJob();
   const updateJob = useUpdateJob();
   const deleteJob = useDeleteJob();

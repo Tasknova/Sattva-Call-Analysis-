@@ -1,0 +1,6 @@
+# Supabase Edge Functions Configuration
+# Note: Cron schedule should be configured in Supabase Dashboard
+# Schedule for update-logout-times: "30 16 * * *" (10 PM IST / 4:30 PM UTC)
+
+[functions.update-logout-times]
+verify_jwt = false

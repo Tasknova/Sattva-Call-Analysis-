@@ -231,7 +231,7 @@ export default function EmployeeDashboard() {
   const [currentCallRecordId, setCurrentCallRecordId] = useState<string | null>(null); // Track the call record ID for updating
   
   // Date filter state
-  const [dateFilter, setDateFilter] = useState<'today' | 'week' | 'month' | 'custom'>('month');
+  const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('today');
   const [customDateRange, setCustomDateRange] = useState({
     startDate: '',
     endDate: ''
@@ -533,6 +533,76 @@ export default function EmployeeDashboard() {
             });
             return newSet;
           });
+        }
+      }
+
+      // Create/update daily productivity record with login time from first call of today
+      if (employeeData?.id && mergedCalls && mergedCalls.length > 0) {
+        // Get today's date in local timezone
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayStr = today.toISOString().split('T')[0];
+        
+        // Find calls made today
+        const todaysCalls = mergedCalls.filter(call => {
+          if (!call.call_date) return false;
+          const callDate = new Date(call.call_date);
+          const callDateStr = new Date(callDate.getTime() - callDate.getTimezoneOffset() * 60000)
+            .toISOString()
+            .split('T')[0];
+          return callDateStr === todayStr;
+        });
+        
+        // If there are calls today, get the first call time
+        if (todaysCalls.length > 0) {
+          // Sort by call_date to find first call
+          todaysCalls.sort((a, b) => {
+            const dateA = new Date(a.call_date!).getTime();
+            const dateB = new Date(b.call_date!).getTime();
+            return dateA - dateB;
+          });
+          
+          const firstCall = todaysCalls[0];
+          const firstCallTime = new Date(firstCall.call_date!);
+          
+          // Extract time in HH:MM:SS format
+          const hours = String(firstCallTime.getHours()).padStart(2, '0');
+          const minutes = String(firstCallTime.getMinutes()).padStart(2, '0');
+          const seconds = String(firstCallTime.getSeconds()).padStart(2, '0');
+          const loginTime = `${hours}:${minutes}:${seconds}`;
+          
+          // Check if productivity record exists for today
+          const { data: existingRecord } = await supabase
+            .from('employee_daily_productivity')
+            .select('login_time')
+            .eq('employee_id', employeeData.id)
+            .eq('date', todayStr)
+            .single();
+          
+          // Only create/update if record doesn't exist or login_time is null
+          if (!existingRecord || !existingRecord.login_time) {
+            const { error: upsertError } = await supabase
+              .from('employee_daily_productivity')
+              .upsert({
+                employee_id: employeeData.id,
+                date: todayStr,
+                login_time: loginTime,
+                updated_at: new Date().toISOString()
+              }, {
+                onConflict: 'employee_id,date',
+                ignoreDuplicates: false
+              });
+            
+            if (upsertError) {
+              console.error('Error creating/updating daily productivity record:', upsertError);
+            } else {
+              console.log('EmployeeDashboard - Created/updated daily productivity record:', {
+                date: todayStr,
+                login_time: loginTime,
+                first_call_date: firstCall.call_date
+              });
+            }
+          }
         }
       }
 
@@ -1854,20 +1924,21 @@ Please provide insights that are specific, actionable, and tailored to these met
     const filtered = calls.filter(call => {
       if (!call.call_date) return false;
       const date = new Date(call.call_date);
-      const callTime = date.getTime();
       
       if (dateFilter === 'today') {
-        // Show previous business day (Friday if Monday, otherwise yesterday)
-        const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon, ... 6=Sat
-        const daysToGoBack = dayOfWeek === 1 ? 3 : (dayOfWeek === 0 ? 2 : 1);
-        const reportDate = new Date(now);
-        reportDate.setDate(now.getDate() - daysToGoBack);
-        reportDate.setHours(0, 0, 0, 0);
-        const reportDateEnd = new Date(reportDate);
-        reportDateEnd.setHours(23, 59, 59, 999);
-        return callTime >= reportDate.getTime() && callTime <= reportDateEnd.getTime();
+        // Compare only the date part from call_date field (YYYY-MM-DD) in UTC
+        const callDateUTC = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+        const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+        return callDateUTC.getTime() === todayUTC.getTime();
+      } else if (dateFilter === 'yesterday') {
+        const callDateUTC = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+        const yesterdayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+        return callDateUTC.getTime() === yesterdayUTC.getTime();
       } else if (dateFilter === 'week') {
-        // Monday to Friday of current week (includes future dates within week)
+        // Monday to Friday of current week
+        const callDateOnly = date.toISOString().split('T')[0];
+        const callDateObj = new Date(callDateOnly + 'T00:00:00Z');
+        
         const weekStart = new Date(now);
         const dayOfWeek = now.getDay();
         const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
@@ -1878,20 +1949,26 @@ Please provide insights that are specific, actionable, and tailored to these met
         weekEnd.setDate(weekStart.getDate() + 4); // Friday
         weekEnd.setHours(23, 59, 59, 999);
         
-        return callTime >= weekStart.getTime() && callTime <= weekEnd.getTime();
+        return callDateObj.getTime() >= weekStart.getTime() && callDateObj.getTime() <= weekEnd.getTime();
       } else if (dateFilter === 'month') {
-        // Entire current month (includes future dates within month)
+        // Entire current month
+        const callDateOnly = date.toISOString().split('T')[0];
+        const callDateObj = new Date(callDateOnly + 'T00:00:00Z');
+        
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
         monthStart.setHours(0, 0, 0, 0);
         const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
         monthEnd.setHours(23, 59, 59, 999);
-        return callTime >= monthStart.getTime() && callTime <= monthEnd.getTime();
+        return callDateObj.getTime() >= monthStart.getTime() && callDateObj.getTime() <= monthEnd.getTime();
       } else if (dateFilter === 'custom' && customDateRange.startDate && customDateRange.endDate) {
+        const callDateOnly = date.toISOString().split('T')[0];
+        const callDateObj = new Date(callDateOnly + 'T00:00:00Z');
+        
         const start = new Date(customDateRange.startDate);
         start.setHours(0, 0, 0, 0);
         const end = new Date(customDateRange.endDate);
         end.setHours(23, 59, 59, 999);
-        return callTime >= start.getTime() && callTime <= end.getTime();
+        return callDateObj.getTime() >= start.getTime() && callDateObj.getTime() <= end.getTime();
       }
       return true;
     });
@@ -1919,6 +1996,13 @@ Please provide insights that are specific, actionable, and tailored to these met
         const reportDateEnd = new Date(reportDate);
         reportDateEnd.setHours(23, 59, 59, 999);
         return analysisTime >= reportDate.getTime() && analysisTime <= reportDateEnd.getTime();
+      } else if (dateFilter === 'yesterday') {
+        const yesterday = new Date(now);
+        yesterday.setDate(now.getDate() - 1);
+        yesterday.setHours(0, 0, 0, 0);
+        const yesterdayEnd = new Date(yesterday);
+        yesterdayEnd.setHours(23, 59, 59, 999);
+        return analysisTime >= yesterday.getTime() && analysisTime <= yesterdayEnd.getTime();
       } else if (dateFilter === 'week') {
         // Monday to Friday of current week (includes future dates within week)
         const weekStart = new Date(now);
@@ -1959,15 +2043,16 @@ Please provide insights that are specific, actionable, and tailored to these met
       const prodTime = date.getTime();
       
       if (dateFilter === 'today') {
-        // Show previous business day (Friday if Monday, otherwise yesterday)
-        const dayOfWeek = now.getDay();
-        const daysToGoBack = dayOfWeek === 1 ? 3 : (dayOfWeek === 0 ? 2 : 1);
-        const reportDate = new Date(now);
-        reportDate.setDate(now.getDate() - daysToGoBack);
-        reportDate.setHours(0, 0, 0, 0);
-        const reportDateEnd = new Date(reportDate);
-        reportDateEnd.setHours(23, 59, 59, 999);
-        return prodTime >= reportDate.getTime() && prodTime <= reportDateEnd.getTime();
+        // Compare only the date part (YYYY-MM-DD)
+        const prodDateStr = date.toISOString().split('T')[0];
+        const todayDateStr = now.toISOString().split('T')[0];
+        return prodDateStr === todayDateStr;
+      } else if (dateFilter === 'yesterday') {
+        const yesterday = new Date(now);
+        yesterday.setDate(now.getDate() - 1);
+        const yesterdayStr = yesterday.toISOString().split('T')[0];
+        const prodDateStr = date.toISOString().split('T')[0];
+        return prodDateStr === yesterdayStr;
       } else if (dateFilter === 'week') {
         // Monday to Friday of current week (includes future dates within week)
         const weekStart = new Date(now);
@@ -2146,6 +2231,16 @@ Please provide insights that are specific, actionable, and tailored to these met
                     }}
                   >
                     Today
+                  </Button>
+                  <Button 
+                    variant={dateFilter === 'yesterday' ? 'default' : 'outline'} 
+                    size="sm"
+                    onClick={() => {
+                      setDateFilter('yesterday');
+                      setShowCustomDatePicker(false);
+                    }}
+                  >
+                    Yesterday
                   </Button>
                   <Button 
                     variant={dateFilter === 'week' ? 'default' : 'outline'} 
@@ -2452,7 +2547,7 @@ Please provide insights that are specific, actionable, and tailored to these met
                   <CardContent className="pt-6 pb-6">
                     <p className="text-sm font-medium text-gray-600 mb-2">Calls Connected</p>
                     <p className="text-4xl font-bold text-gray-900">
-                      {dateFilteredCalls.filter(c => c.outcome !== 'not_answered' && c.outcome !== 'failed').length}
+                      {dateFilteredCalls.filter(c => c.outcome === 'completed').length}
                     </p>
                   </CardContent>
                 </Card>
@@ -2605,19 +2700,19 @@ Please provide insights that are specific, actionable, and tailored to these met
                     </CardContent>
                   </Card>
 
-                  {/* Missed Calls */}
+                  {/* Failed Calls */}
                   <Card 
                     className="bg-white shadow-sm hover:shadow-md transition-shadow cursor-pointer hover:bg-gray-50"
                     onClick={() => {
                       setSelectedTab('calls');
                       setCallDateFilter(dateFilter === 'today' ? 'today' : dateFilter === 'week' ? 'week' : dateFilter === 'month' ? 'month' : 'all');
-                      setCallOutcomeFilter('not_answered');
+                      setCallOutcomeFilter('Failed');
                     }}
                   >
                     <CardContent className="pt-6 pb-6">
-                      <p className="text-sm font-medium text-gray-600 mb-2">Missed Calls</p>
+                      <p className="text-sm font-medium text-gray-600 mb-2">Failed Calls</p>
                       <p className="text-4xl font-bold text-red-600">
-                        {dateFilteredCalls.filter(c => c.outcome === 'not_answered').length}
+                        {dateFilteredCalls.filter(c => c.outcome === 'Failed').length}
                       </p>
                     </CardContent>
                   </Card>
@@ -2628,13 +2723,13 @@ Please provide insights that are specific, actionable, and tailored to these met
                     onClick={() => {
                       setSelectedTab('calls');
                       setCallDateFilter(dateFilter === 'today' ? 'today' : dateFilter === 'week' ? 'week' : dateFilter === 'month' ? 'month' : 'all');
-                      setCallOutcomeFilter('follow_up');
+                      setCallOutcomeFilter('followup');
                     }}
                   >
                     <CardContent className="pt-6 pb-6">
                       <p className="text-sm font-medium text-gray-600 mb-2">Follow-up Calls</p>
                       <p className="text-4xl font-bold text-orange-600">
-                        {dateFilteredCalls.filter(c => c.outcome === 'follow_up').length}
+                        {dateFilteredCalls.filter(c => c.outcome === 'no-answer' || c.outcome === 'busy').length}
                       </p>
                     </CardContent>
                   </Card>
@@ -2643,22 +2738,24 @@ Please provide insights that are specific, actionable, and tailored to these met
 
               {/* Row 4: Additional Stats */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
-                  <CardContent className="pt-6 pb-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-gray-600 mb-1">Avg Calls per Day</p>
-                        <p className="text-3xl font-bold text-gray-900">
-                          {(() => {
-                            const uniqueDays = new Set(dateFilteredCalls.map(c => new Date(c.created_at).toISOString().split('T')[0]));
-                            return uniqueDays.size > 0 ? (dateFilteredCalls.length / uniqueDays.size).toFixed(1) : 0;
-                          })()}
-                        </p>
+                {dateFilter !== 'today' && (
+                  <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
+                    <CardContent className="pt-6 pb-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-gray-600 mb-1">Avg Calls per Day</p>
+                          <p className="text-3xl font-bold text-gray-900">
+                            {(() => {
+                              const uniqueDays = new Set(dateFilteredCalls.map(c => new Date(c.created_at).toISOString().split('T')[0]));
+                              return uniqueDays.size > 0 ? (dateFilteredCalls.length / uniqueDays.size).toFixed(1) : 0;
+                            })()}
+                          </p>
+                        </div>
+                        <PhoneCall className="h-8 w-8 text-blue-600" />
                       </div>
-                      <PhoneCall className="h-8 w-8 text-blue-600" />
-                    </div>
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
+                )}
 
                 <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
                   <CardContent className="pt-6 pb-6">
@@ -2667,7 +2764,7 @@ Please provide insights that are specific, actionable, and tailored to these met
                         <p className="text-sm text-gray-600 mb-1">Success Rate</p>
                         <p className="text-3xl font-bold text-green-600">
                           {dateFilteredCalls.length > 0 
-                            ? ((dateFilteredCalls.filter(c => c.outcome === 'converted').length / dateFilteredCalls.length) * 100).toFixed(1)
+                            ? ((dateFilteredCalls.filter(c => c.outcome === 'completed').length / dateFilteredCalls.length) * 100).toFixed(1)
                             : 0}%
                         </p>
                       </div>
@@ -2675,148 +2772,7 @@ Please provide insights that are specific, actionable, and tailored to these met
                     </div>
                   </CardContent>
                 </Card>
-
-                <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
-                  <CardContent className="pt-6 pb-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-gray-600 mb-1">Pending Follow-ups</p>
-                        <p className="text-3xl font-bold text-orange-600">
-                          {dateFilteredCalls.filter(c => c.outcome === 'follow_up').length}
-                        </p>
-                      </div>
-                      <Clock className="h-8 w-8 text-orange-600" />
-                    </div>
-                  </CardContent>
-                </Card>
               </div>
-
-              {/* Row 5: Productivity Breakdown */}
-              <Card className="bg-white shadow-sm">
-                <CardHeader>
-                  <CardTitle>Productivity Breakdown</CardTitle>
-                  <CardDescription>How your score is calculated</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <div className="flex justify-between items-center mb-2">
-                      <div>
-                        <span className="text-sm font-medium">Conversion Rate</span>
-                        <span className="text-xs text-muted-foreground ml-2">(Weight: 40%)</span>
-                      </div>
-                      <span className="text-sm font-bold">
-                        {dateFilteredCalls.length > 0 
-                          ? ((dateFilteredCalls.filter(c => c.outcome === 'converted').length / dateFilteredCalls.length) * 100).toFixed(1)
-                          : 0}%
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div 
-                        className="bg-green-600 h-2 rounded-full transition-all" 
-                        style={{ 
-                          width: `${dateFilteredCalls.length > 0 
-                            ? ((dateFilteredCalls.filter(c => c.outcome === 'converted').length / dateFilteredCalls.length) * 100)
-                            : 0}%` 
-                        }}
-                      ></div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between items-center mb-2">
-                      <div>
-                        <span className="text-sm font-medium">Profile Utilization</span>
-                        <span className="text-xs text-muted-foreground ml-2">(Weight: 30%)</span>
-                      </div>
-                      <span className="text-sm font-bold">
-                        {(() => {
-                          const profilesDownloaded = dateFilteredDailyProductivity.reduce((sum, dp) => sum + (dp.profiles_downloaded || 0), 0);
-                          const callsMade = dateFilteredCalls.length;
-                          return profilesDownloaded > 0 
-                            ? Math.min((callsMade / profilesDownloaded) * 100, 100).toFixed(1)
-                            : 0;
-                        })()}%
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div 
-                        className="bg-blue-600 h-2 rounded-full transition-all" 
-                        style={{ 
-                          width: `${(() => {
-                            const profilesDownloaded = dateFilteredDailyProductivity.reduce((sum, dp) => sum + (dp.profiles_downloaded || 0), 0);
-                            const callsMade = dateFilteredCalls.length;
-                            return profilesDownloaded > 0 
-                              ? Math.min((callsMade / profilesDownloaded) * 100, 100)
-                              : 0;
-                          })()}%` 
-                        }}
-                      ></div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between items-center mb-2">
-                      <div>
-                        <span className="text-sm font-medium">Follow-up Rate</span>
-                        <span className="text-xs text-muted-foreground ml-2">(Weight: 30%)</span>
-                      </div>
-                      <span className="text-sm font-bold">
-                        {dateFilteredCalls.length > 0 
-                          ? ((dateFilteredCalls.filter(c => c.outcome === 'follow_up').length / dateFilteredCalls.length) * 100).toFixed(1)
-                          : 0}%
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div 
-                        className="bg-purple-600 h-2 rounded-full transition-all" 
-                        style={{ 
-                          width: `${dateFilteredCalls.length > 0 
-                            ? ((dateFilteredCalls.filter(c => c.outcome === 'follow_up').length / dateFilteredCalls.length) * 100)
-                            : 0}%` 
-                        }}
-                      ></div>
-                    </div>
-                  </div>
-
-                  <div className="pt-4 mt-4 border-t border-gray-200">
-                    <div className="flex justify-between items-center mb-2">
-                      <div>
-                        <span className="text-sm font-medium">Average Work Hours</span>
-                      </div>
-                      <span className="text-sm font-bold">
-                        {(() => {
-                          if (dateFilteredDailyProductivity.length === 0) return '0.0h';
-                          
-                          const totalHours = dateFilteredDailyProductivity.reduce((sum, dp) => {
-                            return sum + (parseFloat(dp.work_hours) || 0);
-                          }, 0);
-                          
-                          const avgHours = (totalHours / dateFilteredDailyProductivity.length).toFixed(1);
-                          return `${avgHours}h`;
-                        })()}
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div 
-                        className="bg-indigo-600 h-2 rounded-full transition-all" 
-                        style={{ 
-                          width: `${(() => {
-                            if (dateFilteredDailyProductivity.length === 0) return 0;
-                            
-                            const totalHours = dateFilteredDailyProductivity.reduce((sum, dp) => {
-                              return sum + (parseFloat(dp.work_hours) || 0);
-                            }, 0);
-                            
-                            const avgHours = totalHours / dateFilteredDailyProductivity.length;
-                            // Show as percentage of 8 hours (standard workday)
-                            return Math.min((avgHours / 8) * 100, 100);
-                          })()}%` 
-                        }}
-                      ></div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
             </TabsContent>
 
             <TabsContent value="productivity" className="space-y-6">
@@ -3080,126 +3036,7 @@ Please provide insights that are specific, actionable, and tailored to these met
                 </div>
 
                 {/* Detailed Metrics */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                  {/* Productivity Breakdown */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Productivity Breakdown</CardTitle>
-                      <CardDescription>How your score is calculated</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div>
-                        <div className="flex justify-between items-center mb-2">
-                          <div>
-                            <span className="text-sm font-medium">Conversion Rate</span>
-                            <span className="text-xs text-muted-foreground ml-2">(Weight: 40%)</span>
-                          </div>
-                          <span className="text-sm font-bold">
-                            {dateFilteredCalls.length > 0 
-                              ? ((dateFilteredCalls.filter(c => c.outcome === 'converted').length / dateFilteredCalls.length) * 100).toFixed(1)
-                              : 0}%
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div 
-                            className="bg-green-600 h-2 rounded-full transition-all" 
-                            style={{ 
-                              width: `${calls.length > 0 
-                                ? ((calls.filter(c => c.outcome === 'converted').length / calls.length) * 100)
-                                : 0}%` 
-                            }}
-                          ></div>
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between items-center mb-2">
-                          <div>
-                            <span className="text-sm font-medium">Profile Utilization</span>
-                            <span className="text-xs text-muted-foreground ml-2">(Weight: 30%)</span>
-                          </div>
-                          <span className="text-sm font-bold">
-                            {analyses.length > 0 
-                              ? Math.min((calls.length / analyses.length) * 100, 100).toFixed(1)
-                              : 0}%
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div 
-                            className="bg-blue-600 h-2 rounded-full transition-all" 
-                            style={{ 
-                              width: `${analyses.length > 0 
-                                ? Math.min((calls.length / analyses.length) * 100, 100)
-                                : 0}%` 
-                            }}
-                          ></div>
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between items-center mb-2">
-                          <div>
-                            <span className="text-sm font-medium">Follow-up Rate</span>
-                            <span className="text-xs text-muted-foreground ml-2">(Weight: 30%)</span>
-                          </div>
-                          <span className="text-sm font-bold">
-                            {calls.length > 0 
-                              ? ((calls.filter(c => c.outcome === 'follow_up').length / calls.length) * 100).toFixed(1)
-                              : 0}%
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div 
-                            className="bg-purple-600 h-2 rounded-full transition-all" 
-                            style={{ 
-                              width: `${calls.length > 0 
-                                ? ((calls.filter(c => c.outcome === 'follow_up').length / calls.length) * 100)
-                                : 0}%` 
-                            }}
-                          ></div>
-                        </div>
-                      </div>
-
-                      <div className="pt-4 mt-4 border-t border-gray-200">
-                        <div className="flex justify-between items-center mb-2">
-                          <div>
-                            <span className="text-sm font-medium">Average Work Hours</span>
-                          </div>
-                          <span className="text-sm font-bold">
-                            {(() => {
-                              if (dailyProductivity.length === 0) return '0.0h';
-                              
-                              const totalHours = dailyProductivity.reduce((sum, dp) => {
-                                return sum + (parseFloat(dp.work_hours) || 0);
-                              }, 0);
-                              
-                              const avgHours = (totalHours / dailyProductivity.length).toFixed(1);
-                              return `${avgHours}h`;
-                            })()}
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div 
-                            className="bg-indigo-600 h-2 rounded-full transition-all" 
-                            style={{ 
-                              width: `${(() => {
-                                if (dailyProductivity.length === 0) return 0;
-                                
-                                const totalHours = dailyProductivity.reduce((sum, dp) => {
-                                  return sum + (parseFloat(dp.work_hours) || 0);
-                                }, 0);
-                                
-                                const avgHours = totalHours / dailyProductivity.length;
-                                // Show as percentage of 8 hours (standard workday)
-                                return Math.min((avgHours / 8) * 100, 100);
-                              })()}%` 
-                            }}
-                          ></div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
+                <div className="grid grid-cols-1 gap-6 mb-8">
                   {/* Last 7 Days Productivity Score */}
                   <Card>
                     <CardHeader>
@@ -3304,7 +3141,7 @@ Please provide insights that are specific, actionable, and tailored to these met
                 </div>
 
                 {/* Additional Stats */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4" style={{ display: 'none' }}>
                   <Card>
                     <CardContent className="pt-6">
                       <div className="flex items-center justify-between">
@@ -3334,20 +3171,6 @@ Please provide insights that are specific, actionable, and tailored to these met
                           </p>
                         </div>
                         <TrendingUp className="h-8 w-8 text-green-600" />
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardContent className="pt-6">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm text-muted-foreground mb-1">Pending Follow-ups</p>
-                          <p className="text-2xl font-bold text-orange-600">
-                            {calls.filter(c => c.outcome === 'follow_up').length}
-                          </p>
-                        </div>
-                        <Clock className="h-8 w-8 text-orange-600" />
                       </div>
                     </CardContent>
                   </Card>
@@ -3839,44 +3662,24 @@ Please provide insights that are specific, actionable, and tailored to these met
                     All ({calls.length})
                   </button>
                   <button
-                    onClick={() => setCallOutcomeFilter('converted')}
+                    onClick={() => setCallOutcomeFilter('followup')}
                     className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
-                      callOutcomeFilter === 'converted'
+                      callOutcomeFilter === 'followup'
                         ? 'border-blue-600 text-blue-600'
                         : 'border-transparent text-gray-500 hover:text-gray-700'
                     }`}
                   >
-                    Converted ({calls.filter(c => c.outcome === 'converted').length})
+                    Follow-up ({calls.filter(c => c.outcome === 'no-answer' || c.outcome === 'busy').length})
                   </button>
                   <button
-                    onClick={() => setCallOutcomeFilter('not_answered')}
+                    onClick={() => setCallOutcomeFilter('Failed')}
                     className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
-                      callOutcomeFilter === 'not_answered'
+                      callOutcomeFilter === 'Failed'
                         ? 'border-blue-600 text-blue-600'
                         : 'border-transparent text-gray-500 hover:text-gray-700'
                     }`}
                   >
-                    Not Answered ({calls.filter(c => c.outcome === 'not_answered').length})
-                  </button>
-                  <button
-                    onClick={() => setCallOutcomeFilter('follow_up')}
-                    className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
-                      callOutcomeFilter === 'follow_up'
-                        ? 'border-blue-600 text-blue-600'
-                        : 'border-transparent text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    Follow-up ({calls.filter(c => c.outcome === 'follow_up').length})
-                  </button>
-                  <button
-                    onClick={() => setCallOutcomeFilter('failed')}
-                    className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
-                      callOutcomeFilter === 'failed'
-                        ? 'border-blue-600 text-blue-600'
-                        : 'border-transparent text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    Rejected ({calls.filter(c => c.outcome === 'failed').length})
+                    Failed ({calls.filter(c => c.outcome === 'Failed').length})
                   </button>
                 </div>
               </div>
@@ -3900,23 +3703,24 @@ Please provide insights that are specific, actionable, and tailored to these met
 
                       // Filter by outcome from call_history table
                       if (callOutcomeFilter !== 'all') {
-                        filteredCalls = filteredCalls.filter(call => call.outcome === callOutcomeFilter);
+                        if (callOutcomeFilter === 'followup') {
+                          // Follow-up includes both no-answer and busy
+                          filteredCalls = filteredCalls.filter(call => call.outcome === 'no-answer' || call.outcome === 'busy');
+                        } else {
+                          filteredCalls = filteredCalls.filter(call => call.outcome === callOutcomeFilter);
+                        }
                       }
 
-                      // Filter by date - MUST MATCH DASHBOARD DATE FILTERING LOGIC
+                      // Filter by date - Use date-only comparison to match dateFilteredCalls
                       const now = new Date();
                       if (callDateFilter === 'today') {
-                        // Show previous business day (Friday if Monday, otherwise yesterday) - MATCHES DASHBOARD
-                        const dayOfWeek = now.getDay();
-                        const daysToGoBack = dayOfWeek === 1 ? 3 : (dayOfWeek === 0 ? 2 : 1);
-                        const reportDate = new Date(now);
-                        reportDate.setDate(now.getDate() - daysToGoBack);
-                        reportDate.setHours(0, 0, 0, 0);
-                        const reportDateEnd = new Date(reportDate);
-                        reportDateEnd.setHours(23, 59, 59, 999);
+                        // Compare only the date part (YYYY-MM-DD)
+                        const todayDateStr = now.toISOString().split('T')[0];
                         filteredCalls = filteredCalls.filter(call => {
-                          const callTime = new Date(call.call_date || call.created_at).getTime();
-                          return callTime >= reportDate.getTime() && callTime <= reportDateEnd.getTime();
+                          if (!call.call_date) return false;
+                          const callDate = new Date(call.call_date);
+                          const callDateStr = callDate.toISOString().split('T')[0];
+                          return callDateStr === todayDateStr;
                         });
                       } else if (callDateFilter === 'week') {
                         // Monday to Friday of current week - MATCHES DASHBOARD
