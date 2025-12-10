@@ -2749,81 +2749,65 @@ Please provide insights that are specific, actionable, and tailored to these met
                 </Card>
 
                 {/* Additional Metrics */}
-                <div className="grid grid-cols-2 gap-4">
-                  {/* Calls Analyzed */}
-                  <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
-                    <CardContent className="pt-6 pb-6">
-                      <p className="text-sm font-medium text-gray-600 mb-2">Calls Analyzed</p>
-                      <p className="text-4xl font-bold text-blue-600">
-                        {dateFilteredAnalyses.length}
-                      </p>
-                    </CardContent>
-                  </Card>
+                <div className="space-y-4">
+                  {/* First Row: Calls Analyzed and Failed Calls */}
+                  <div className="grid grid-cols-2 gap-4">
+                    {/* Calls Analyzed */}
+                    <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
+                      <CardContent className="pt-6 pb-6">
+                        <p className="text-sm font-medium text-gray-600 mb-2">Calls Analyzed</p>
+                        <p className="text-4xl font-bold text-blue-600">
+                          {dateFilteredAnalyses.length}
+                        </p>
+                      </CardContent>
+                    </Card>
 
-                  {/* Relevant Calls */}
-                  <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
-                    <CardContent className="pt-6 pb-6">
-                      <p className="text-sm font-medium text-gray-600 mb-2">Relevant Calls</p>
-                      <p className="text-4xl font-bold text-green-600">
-                        {dateFilteredCalls.filter(c => (c.exotel_duration || 0) > 30).length}
-                      </p>
-                    </CardContent>
-                  </Card>
+                    {/* Failed Calls */}
+                    <Card 
+                      className="bg-white shadow-sm hover:shadow-md transition-shadow cursor-pointer hover:bg-gray-50"
+                      onClick={() => {
+                        setSelectedTab('calls');
+                        setCallDateFilter(dateFilter === 'today' ? 'today' : dateFilter === 'week' ? 'week' : dateFilter === 'month' ? 'month' : 'all');
+                        setCallOutcomeFilter('Failed');
+                      }}
+                    >
+                      <CardContent className="pt-6 pb-6">
+                        <p className="text-sm font-medium text-gray-600 mb-2">Failed Calls</p>
+                        <p className="text-4xl font-bold text-red-600">
+                          {dateFilteredCalls.filter(c => c.outcome === 'Failed').length}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  </div>
 
-                  {/* Failed Calls */}
-                  <Card 
-                    className="bg-white shadow-sm hover:shadow-md transition-shadow cursor-pointer hover:bg-gray-50"
-                    onClick={() => {
-                      setSelectedTab('calls');
-                      setCallDateFilter(dateFilter === 'today' ? 'today' : dateFilter === 'week' ? 'week' : dateFilter === 'month' ? 'month' : 'all');
-                      setCallOutcomeFilter('Failed');
-                    }}
-                  >
-                    <CardContent className="pt-6 pb-6">
-                      <p className="text-sm font-medium text-gray-600 mb-2">Failed Calls</p>
-                      <p className="text-4xl font-bold text-red-600">
-                        {dateFilteredCalls.filter(c => c.outcome === 'Failed').length}
-                      </p>
-                    </CardContent>
-                  </Card>
+                  {/* Second Row: Relevant and Irrelevant Calls */}
+                  <div className="grid grid-cols-2 gap-4">
+                    {/* Relevant Calls */}
+                    <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
+                      <CardContent className="pt-6 pb-6">
+                        <p className="text-sm font-medium text-gray-600 mb-2">Relevant Calls (&gt;30s)</p>
+                        <p className="text-4xl font-bold text-green-600">
+                          {dateFilteredCalls.filter(c => (c.exotel_duration || 0) > 30).length}
+                        </p>
+                      </CardContent>
+                    </Card>
 
-                  {/* Follow-up Calls */}
-                  <Card 
-                    className="bg-white shadow-sm hover:shadow-md transition-shadow cursor-pointer hover:bg-gray-50"
-                    onClick={() => {
-                      setSelectedTab('calls');
-                      setCallDateFilter(dateFilter === 'today' ? 'today' : dateFilter === 'week' ? 'week' : dateFilter === 'month' ? 'month' : 'all');
-                      setCallOutcomeFilter('followup');
-                    }}
-                  >
-                    <CardContent className="pt-6 pb-6">
-                      <p className="text-sm font-medium text-gray-600 mb-2">Follow-up Calls</p>
-                      <p className="text-4xl font-bold text-orange-600">
-                        {(() => {
-                          // Get call IDs from analyses that have valid follow-up details
-                          const followUpCallIds = new Set(
-                            dateFilteredAnalyses
-                              .filter(a => {
-                                const hasFollowUp = a.follow_up_details && 
-                                  a.follow_up_details.trim().length > 0 && 
-                                  !a.follow_up_details.toLowerCase().includes('irrelevant according to transcript');
-                                return hasFollowUp && a.recordings?.call_history_id;
-                              })
-                              .map(a => a.recordings?.call_history_id)
-                              .filter(Boolean)
-                          );
-                          // Count calls that have follow-up requirement
-                          return dateFilteredCalls.filter(c => followUpCallIds.has(c.id)).length;
-                        })()}
-                      </p>
-                    </CardContent>
-                  </Card>
+                    {/* Irrelevant Calls */}
+                    <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
+                      <CardContent className="pt-6 pb-6">
+                        <p className="text-sm font-medium text-gray-600 mb-2">Irrelevant Calls (&lt;30s)</p>
+                        <p className="text-4xl font-bold text-gray-600">
+                          {dateFilteredCalls.filter(c => (c.exotel_duration || 0) <= 30).length}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  </div>
                 </div>
               </div>
 
-              {/* Row 4: Additional Stats */}
+              {/* Row 4: Additional Stats - Single Row */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {dateFilter !== 'today' && (
+                {dateFilter !== 'today' ? (
                   <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
                     <CardContent className="pt-6 pb-6">
                       <div className="flex items-center justify-between">
@@ -2840,6 +2824,8 @@ Please provide insights that are specific, actionable, and tailored to these met
                       </div>
                     </CardContent>
                   </Card>
+                ) : (
+                  <div></div>
                 )}
 
                 <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
@@ -2854,6 +2840,43 @@ Please provide insights that are specific, actionable, and tailored to these met
                         </p>
                       </div>
                       <TrendingUp className="h-8 w-8 text-green-600" />
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Follow-up Calls */}
+                <Card 
+                  className="bg-white shadow-sm hover:shadow-md transition-shadow cursor-pointer hover:bg-gray-50"
+                  onClick={() => {
+                    setSelectedTab('calls');
+                    setCallDateFilter(dateFilter === 'today' ? 'today' : dateFilter === 'week' ? 'week' : dateFilter === 'month' ? 'month' : 'all');
+                    setCallOutcomeFilter('followup');
+                  }}
+                >
+                  <CardContent className="pt-6 pb-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-gray-600 mb-1">Follow-up Calls</p>
+                        <p className="text-3xl font-bold text-orange-600">
+                          {(() => {
+                            // Get call IDs from analyses that have valid follow-up details
+                            const followUpCallIds = new Set(
+                              dateFilteredAnalyses
+                                .filter(a => {
+                                  const hasFollowUp = a.follow_up_details && 
+                                    a.follow_up_details.trim().length > 0 && 
+                                    !a.follow_up_details.toLowerCase().includes('irrelevant according to transcript');
+                                  return hasFollowUp && a.recordings?.call_history_id;
+                                })
+                                .map(a => a.recordings?.call_history_id)
+                                .filter(Boolean)
+                            );
+                            // Count calls that have follow-up requirement
+                            return dateFilteredCalls.filter(c => followUpCallIds.has(c.id)).length;
+                          })()}
+                        </p>
+                      </div>
+                      <Calendar className="h-8 w-8 text-orange-600" />
                     </div>
                   </CardContent>
                 </Card>
