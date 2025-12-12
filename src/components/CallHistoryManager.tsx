@@ -618,8 +618,10 @@ export default function CallHistoryManager({ companyId, managerId }: CallHistory
 
     const matchesEmployee = selectedEmployee === "all" || call.employee_id === selectedEmployee;
     
-    // Manager filter: employees.manager_id is the manager's primary key (id), not user_id
-    const matchesManager = selectedManager === "all" || call.employees?.manager_id === selectedManager;
+    // Manager filter: employees.manager_id may reference either the manager's
+    // `id` or their `user_id`. Try both to be robust across schema shapes.
+    const selectedManagerUserId = allManagers.find(m => m.id === selectedManager)?.user_id;
+    const matchesManager = selectedManager === "all" || call.employees?.manager_id === selectedManager || call.employees?.manager_id === selectedManagerUserId;
     
     // Debug logging for manager filter
     if (selectedManager !== "all" && call.employees) {
@@ -746,22 +748,34 @@ export default function CallHistoryManager({ companyId, managerId }: CallHistory
     fetchFilterData();
   }, [managerId, userRole?.company_id]);
 
-  // Use all employees for filter, not just those who made calls
-  // Use user_id as the id since employee_id in call_history is the user_id
-  const employees = allEmployees.map(emp => ({
+  // Build employee options for the select. Use user_id as the value because
+  // `call_history.employee_id` stores the employee's user_id. Prefer showing
+  // `full_name`, but fall back to `email` or `user_id` so the UI never shows a raw id.
+  const allEmployeeOptions = allEmployees.map(emp => ({
     id: emp.user_id,
-    name: emp.full_name || 'Unknown Employee'
+    name: emp.full_name || emp.email || emp.user_id,
+    manager_id: emp.manager_id || null,
   }));
 
-  // Use manager.id (not user_id) because employees.manager_id references managers.id
-  const managers = allManagers.map(mgr => ({
+  // Build manager options. Some systems use `managers.id` and others reference
+  // the manager's `user_id` on employees.manager_id — include both to match either.
+  const managerOptions = allManagers.map(mgr => ({
     id: mgr.id,
-    name: mgr.full_name || 'Unknown Manager'
+    user_id: mgr.user_id,
+    name: mgr.full_name || mgr.email || mgr.user_id,
   }));
+
+  // When a manager is selected, show employees whose `manager_id` matches
+  // either the manager's `id` or their `user_id`. This covers schema differences.
+  const selectedManagerObj = managerOptions.find(m => m.id === selectedManager);
+
+  const employeesForSelectedManager = selectedManager === 'all'
+    ? []
+    : allEmployeeOptions.filter(emp => emp.manager_id === selectedManager || (selectedManagerObj && emp.manager_id === selectedManagerObj.user_id));
 
   // Debug: Log managers for dropdown
-  if (managers.length > 0 && !managerId) {
-    console.log('Managers for dropdown:', managers);
+  if (managerOptions.length > 0 && !managerId) {
+    console.log('Managers for dropdown:', managerOptions);
   }
 
   if (loading) {
@@ -803,9 +817,9 @@ export default function CallHistoryManager({ companyId, managerId }: CallHistory
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Search */}
-            <div className="relative lg:col-span-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+            {/* Search (spans two columns on medium+) */}
+            <div className="relative sm:col-span-2 lg:col-span-2">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search calls by lead name, email, employee, or notes..."
@@ -816,7 +830,7 @@ export default function CallHistoryManager({ companyId, managerId }: CallHistory
             </div>
 
             {/* Date Range Filter */}
-            <div className="lg:col-span-3 flex items-center gap-2">
+            <div className="sm:col-span-2 lg:col-span-1 flex items-center gap-2">
               <Popover>
                 <PopoverTrigger asChild>
                   <Button
@@ -862,64 +876,72 @@ export default function CallHistoryManager({ companyId, managerId }: CallHistory
                 </Button>
               )}
             </div>
-
             {/* Employee Filter */}
-            <select
-              value={selectedEmployee}
-              onChange={(e) => setSelectedEmployee(e.target.value)}
-              className="px-3 py-2 border border-input bg-background rounded-md text-sm"
-            >
-              <option value="all">All Employees</option>
-              {employees.map(employee => (
-                <option key={employee.id} value={employee.id}>
-                  {employee.name}
-                </option>
-              ))}
-            </select>
-
-            {/* Manager Filter - Only show for admin */}
-            {!managerId && managers.length > 0 && (
+            <div className="sm:col-span-1 lg:col-span-1">
               <select
-                value={selectedManager}
-                onChange={(e) => setSelectedManager(e.target.value)}
-                className="px-3 py-2 border border-input bg-background rounded-md text-sm"
+                value={selectedEmployee}
+                onChange={(e) => setSelectedEmployee(e.target.value)}
+                disabled={selectedManager === 'all'}
+                className="w-full px-3 py-2 border border-input bg-background rounded-md text-sm"
               >
-                <option value="all">All Managers</option>
-                {managers.map(manager => (
-                  <option key={manager.id} value={manager.id}>
-                    {manager.name}
+                <option value="all">{selectedManager === 'all' ? 'Select manager first' : 'All Employees'}</option>
+                {employeesForSelectedManager.map(employee => (
+                  <option key={employee.id} value={employee.id}>
+                    {employee.name}
                   </option>
                 ))}
               </select>
+            </div>
+
+            {/* Manager Filter - Only show for admin */}
+            {!managerId && managerOptions.length > 0 && (
+              <div className="sm:col-span-1 lg:col-span-1">
+                <select
+                  value={selectedManager}
+                  onChange={(e) => { setSelectedManager(e.target.value); setSelectedEmployee('all'); }}
+                  className="w-full px-3 py-2 border border-input bg-background rounded-md text-sm"
+                >
+                  <option value="all">All Managers</option>
+                  {managerOptions.map(manager => (
+                    <option key={manager.id} value={manager.id}>
+                      {manager.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             )}
 
             {/* Outcome Filter */}
-            <select
-              value={selectedOutcome}
-              onChange={(e) => setSelectedOutcome(e.target.value)}
-              className="px-3 py-2 border border-input bg-background rounded-md text-sm"
-            >
-              <option value="all">All Outcomes</option>
-              <option value="completed">Completed</option>
-              <option value="no-answer">No Answer</option>
-              <option value="Failed">Failed</option>
-              <option value="follow_up">Follow-up</option>
-              <option value="not_interested">Not Interested</option>
-            </select>
+            <div className="sm:col-span-1 lg:col-span-1">
+              <select
+                value={selectedOutcome}
+                onChange={(e) => setSelectedOutcome(e.target.value)}
+                className="w-full px-3 py-2 border border-input bg-background rounded-md text-sm"
+              >
+                <option value="all">All Outcomes</option>
+                <option value="completed">Completed</option>
+                <option value="no-answer">No Answer</option>
+                <option value="Failed">Failed</option>
+                <option value="follow_up">Follow-up</option>
+                <option value="not_interested">Not Interested</option>
+              </select>
+            </div>
 
             {/* Analysis Status Filter */}
-            <select
-              value={selectedAnalysisStatus}
-              onChange={(e) => setSelectedAnalysisStatus(e.target.value)}
-              className="px-3 py-2 border border-input bg-background rounded-md text-sm"
-            >
-              <option value="all">All Call Types</option>
-              <option value="analyzed">Analyzed</option>
-              <option value="not_analyzed">Not Analyzed</option>
-            </select>
+            <div className="sm:col-span-1 lg:col-span-1">
+              <select
+                value={selectedAnalysisStatus}
+                onChange={(e) => setSelectedAnalysisStatus(e.target.value)}
+                className="w-full px-3 py-2 border border-input bg-background rounded-md text-sm"
+              >
+                <option value="all">All Call Types</option>
+                <option value="analyzed">Analyzed</option>
+                <option value="not_analyzed">Not Analyzed</option>
+              </select>
+            </div>
 
             {/* Results Count */}
-            <div className="flex items-center justify-center text-sm text-muted-foreground border rounded-md px-3 py-2 bg-muted/30">
+            <div className="sm:col-span-2 lg:col-span-1 flex items-center justify-center text-sm text-muted-foreground border rounded-md px-3 py-2 bg-muted/30">
               <strong className="mr-1">{filteredCalls.length}</strong> call{filteredCalls.length !== 1 ? 's' : ''} found
             </div>
           </div>

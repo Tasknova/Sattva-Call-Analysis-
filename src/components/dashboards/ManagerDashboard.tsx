@@ -1,5 +1,5 @@
 // Updated ManagerDashboard - Fixed data fetching and employee creation
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { useSessionTimeout } from "@/hooks/useSessionTimeout";
@@ -276,6 +276,62 @@ export default function ManagerDashboard() {
   const dateFilteredCallOutcomes = callOutcomes.filter(outcome => isDateInRange(outcome.call_date || outcome.created_at));
   const dateFilteredCalls = calls.filter(call => isDateInRange(call.call_date || call.created_at));
   const dateFilteredAnalyses = analyses.filter(analysis => isDateInRange(analysis.created_at));
+
+  // callDateFilteredCalls: driven by `callDateFilter` control used in Call History
+  const callDateFilteredCalls = useMemo(() => {
+    const now = new Date();
+    return calls.filter(call => {
+      const callDate = new Date(call.call_date || call.created_at || '');
+      if (Number.isNaN(callDate.getTime())) return false;
+
+      if (callDateFilter === 'today') {
+        const todayStr = now.toISOString().split('T')[0];
+        return (new Date(callDate).toISOString().split('T')[0]) === todayStr;
+      } else if (callDateFilter === 'yesterday') {
+        const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).toISOString().split('T')[0];
+        return (new Date(callDate).toISOString().split('T')[0]) === y;
+      } else if (callDateFilter === 'week') {
+        const dayOfWeek = now.getDay();
+        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - daysFromMonday);
+        weekStart.setHours(0,0,0,0);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 4);
+        weekEnd.setHours(23,59,59,999);
+        const t = new Date(callDate).getTime();
+        return t >= weekStart.getTime() && t <= weekEnd.getTime();
+      } else if (callDateFilter === 'month') {
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        monthStart.setHours(0,0,0,0);
+        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        monthEnd.setHours(23,59,59,999);
+        const t = new Date(callDate).getTime();
+        return t >= monthStart.getTime() && t <= monthEnd.getTime();
+      }
+      return true;
+    });
+  }, [calls, callDateFilter]);
+
+  // baseFilteredCalls: date-filtered by callDateFilter plus employee/search filters
+  const baseFilteredCalls = useMemo(() => {
+    let arr = callDateFilteredCalls.slice();
+
+    if (selectedEmployeeFilter && selectedEmployeeFilter !== 'all') {
+      arr = arr.filter(call => call.employee_id === selectedEmployeeFilter);
+    }
+
+    if (callSearch && callSearch.trim() !== '') {
+      const q = callSearch.trim().toLowerCase();
+      arr = arr.filter(call => {
+        const leadName = (call.leads?.name || '').toLowerCase();
+        const contact = (call.leads?.contact || '').toLowerCase();
+        return leadName.includes(q) || contact.includes(q);
+      });
+    }
+
+    return arr;
+  }, [callDateFilteredCalls, selectedEmployeeFilter, callSearch]);
 
   // Helper function for team performance date filtering
   const isTeamPerfDateInRange = (dateString: string) => {
@@ -2670,7 +2726,7 @@ export default function ManagerDashboard() {
                         : 'border-transparent text-gray-500 hover:text-gray-700'
                     }`}
                   >
-                    All ({calls.length})
+                      All ({baseFilteredCalls.length})
                   </button>
                   <button
                     onClick={() => setCallOutcomeFilter('followup')}
@@ -2692,7 +2748,7 @@ export default function ManagerDashboard() {
                           .map(a => a.recordings?.call_history_id)
                           .filter(Boolean)
                       );
-                      return calls.filter(c => followUpCallIds.has(c.id)).length;
+                      return baseFilteredCalls.filter(c => followUpCallIds.has(c.id)).length;
                     })()})
                   </button>
                   <button
@@ -2703,7 +2759,7 @@ export default function ManagerDashboard() {
                         : 'border-transparent text-gray-500 hover:text-gray-700'
                     }`}
                   >
-                    Failed ({calls.filter(c => c.outcome === 'Failed').length})
+                    Failed ({baseFilteredCalls.filter(c => c.outcome === 'Failed').length})
                   </button>
                 </div>
               </div>

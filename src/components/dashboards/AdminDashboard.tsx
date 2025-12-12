@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { 
   DropdownMenu, 
@@ -67,6 +68,7 @@ import {
   ChevronRight,
   Download
 } from "lucide-react";
+import { Headphones, Link as LinkIcon } from 'lucide-react';
 
 interface User {
   id: string;
@@ -165,6 +167,14 @@ export default function AdminDashboard() {
   const [analysisSearchTerm, setAnalysisSearchTerm] = useState("");
   const [selectedAnalysisEmployee, setSelectedAnalysisEmployee] = useState<string>("all");
   const [selectedClosureProbability, setSelectedClosureProbability] = useState<string>("all");
+  // Call history specific filters (match Manager dashboard)
+  const [callDateFilter, setCallDateFilter] = useState<'all' | 'today' | 'yesterday' | 'week' | 'month'>('all');
+  const [callSearch, setCallSearch] = useState<string>('');
+  const [callSortBy, setCallSortBy] = useState<'date' | 'duration' | 'agent'>('date');
+  const [callSortOrder, setCallSortOrder] = useState<'desc' | 'asc'>('desc');
+  const [callOutcomeFilter, setCallOutcomeFilter] = useState<string>('all');
+  const [selectedCallForDetails, setSelectedCallForDetails] = useState<any>(null);
+  const [isCallDetailsModalOpen, setIsCallDetailsModalOpen] = useState(false);
   const [selectedManagerFilterLeads, setSelectedManagerFilterLeads] = useState<string>('all');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [generatedCredentials, setGeneratedCredentials] = useState<UserCredentials | null>(null);
@@ -173,6 +183,10 @@ export default function AdminDashboard() {
     password: boolean;
   }>({ email: false, password: false });
   const [selectedManagerFilter, setSelectedManagerFilter] = useState<string>('all');
+  useEffect(() => {
+    // When manager filter changes, reset employee filter
+    setSelectedEmployeeFilter('all');
+  }, [selectedManagerFilter]);
   const [selectedDepartmentFilter, setSelectedDepartmentFilter] = useState<string>('all');
   const [selectedManager, setSelectedManager] = useState<Manager | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -2281,6 +2295,78 @@ export default function AdminDashboard() {
     return filtered;
   }, [calls, dateFilter, customDateRange.startDate, customDateRange.endDate]);
 
+  // Specific date filter for Call History header/table (driven by callDateFilter)
+  const callDateFilteredCalls = useMemo(() => {
+    const now = new Date();
+    const currentTime = now.getTime();
+
+    return calls.filter(call => {
+      const callTime = new Date(call.call_date || call.created_at || '').getTime();
+      if (Number.isNaN(callTime)) return false;
+
+      if (callDateFilter === 'today') {
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        return callTime >= todayStart.getTime() && callTime <= todayEnd.getTime();
+      } else if (callDateFilter === 'yesterday') {
+        const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+        const yesterdayStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
+        const yesterdayEnd = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59, 999);
+        return callTime >= yesterdayStart.getTime() && callTime <= yesterdayEnd.getTime();
+      } else if (callDateFilter === 'week') {
+        const dayOfWeek = now.getDay();
+        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - daysFromMonday);
+        weekStart.setHours(0, 0, 0, 0);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 4);
+        weekEnd.setHours(23, 59, 59, 999);
+        return callTime >= weekStart.getTime() && callTime <= weekEnd.getTime();
+      } else if (callDateFilter === 'month') {
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        monthStart.setHours(0, 0, 0, 0);
+        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        monthEnd.setHours(23, 59, 59, 999);
+        return callTime >= monthStart.getTime() && callTime <= monthEnd.getTime();
+      }
+      return true;
+    });
+  }, [calls, callDateFilter]);
+
+  // Base filtered calls for header counts: apply manager, employee and search filters
+  const baseFilteredCalls = useMemo(() => {
+    let arr = callDateFilteredCalls.slice();
+
+    if (selectedManagerFilter && selectedManagerFilter !== 'all') {
+      const managerUserId = managers.find(m => m.id === selectedManagerFilter)?.user_id;
+      arr = arr.filter(call => {
+        const callManagerId = call.employees?.manager_id;
+        if (!callManagerId) {
+          const emp = employees.find(e => e.user_id === call.employee_id || e.id === call.employee_id);
+          if (!emp) return false;
+          return emp.manager_id === selectedManagerFilter || (managerUserId && emp.manager_id === managerUserId);
+        }
+        return callManagerId === selectedManagerFilter || (managerUserId && callManagerId === managerUserId);
+      });
+    }
+
+    if (selectedEmployeeFilter && selectedEmployeeFilter !== 'all') {
+      arr = arr.filter(call => call.employee_id === selectedEmployeeFilter);
+    }
+
+    if (callSearch && callSearch.trim() !== '') {
+      const q = callSearch.trim().toLowerCase();
+      arr = arr.filter(call => {
+        const leadName = (call.leads?.name || '').toLowerCase();
+        const contact = (call.leads?.contact || '').toLowerCase();
+        return leadName.includes(q) || contact.includes(q);
+      });
+    }
+
+    return arr;
+  }, [callDateFilteredCalls, selectedManagerFilter, selectedEmployeeFilter, callSearch, managers, employees]);
+
   const dateFilteredAnalyses = useMemo(() => {
     const now = new Date();
     const currentTime = now.getTime();
@@ -4182,14 +4268,514 @@ export default function AdminDashboard() {
 
           {activeSidebarItem === 'call-history' && (
             <div className="space-y-6">
+              {/* Header with Filters */}
               <div>
-                <h2 className="text-2xl font-bold">Call History</h2>
-                <p className="text-muted-foreground">View all calls made by your team members.</p>
+                <div>
+                  <h2 className="text-2xl font-bold">Team Call History</h2>
+                  <p className="text-muted-foreground mt-1">View and manage all team member calls</p>
+                </div>
+
+                {/* Filters on a new line with wrapping for responsiveness */}
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <Select value={callDateFilter} onValueChange={setCallDateFilter}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Last 30 days" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Time</SelectItem>
+                      <SelectItem value="today">Today</SelectItem>
+                      <SelectItem value="yesterday">Yesterday</SelectItem>
+                      <SelectItem value="week">Last 7 days</SelectItem>
+                      <SelectItem value="month">Last 30 days</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {/* Manager Filter for Admin: choose manager first to enable employee filter */}
+                  <Select value={selectedManagerFilter} onValueChange={(v) => setSelectedManagerFilter(v as any)}>
+                    <SelectTrigger className="w-[220px]">
+                      <SelectValue placeholder="All Managers" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Managers</SelectItem>
+                      {managers.map(m => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.profile?.full_name || m.profile?.email || m.user_id || m.id}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={selectedEmployeeFilter} onValueChange={setSelectedEmployeeFilter}>
+                    <SelectTrigger className="w-[220px]">
+                      <SelectValue placeholder={selectedManagerFilter === 'all' ? 'Select manager first' : 'All Employees'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {selectedManagerFilter === 'all' ? (
+                        <SelectItem value="all">Select manager first</SelectItem>
+                      ) : (
+                        <>
+                          <SelectItem value="all">All Employees</SelectItem>
+                          {employees
+                            .filter(emp => {
+                              // employee.manager_id in DB may store manager.id or manager.user_id
+                              const managerUserId = managers.find(m => m.id === selectedManagerFilter)?.user_id;
+                              return emp.manager_id === selectedManagerFilter || (managerUserId && emp.manager_id === managerUserId);
+                            })
+                            .map(emp => (
+                              <SelectItem key={emp.id} value={emp.user_id}>
+                                {emp.profile?.full_name || emp.profile?.email || emp.user_id}
+                              </SelectItem>
+                            ))}
+                        </>
+                      )}
+                    </SelectContent>
+                  </Select>
+
+                  <Input
+                    className="w-[260px]"
+                    placeholder="Search lead or phone"
+                    value={callSearch}
+                    onChange={(e) => setCallSearch(e.target.value)}
+                  />
+
+                  <Select value={callSortBy} onValueChange={(v) => setCallSortBy(v as any)}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Sort By" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="date">Date-Time</SelectItem>
+                      <SelectItem value="duration">Duration</SelectItem>
+                      <SelectItem value="agent">Agent</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={callSortOrder} onValueChange={(v) => setCallSortOrder(v as any)}>
+                    <SelectTrigger className="w-[120px]">
+                      <SelectValue placeholder="Order" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="desc">Descending</SelectItem>
+                      <SelectItem value="asc">Assending</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <CallHistoryManager 
-                companyId={userRole?.company_id || ''} 
-                managerId={null} // null means show all calls for the company
-              />
+
+              {/* Filter Tabs */}
+              <div className="border-b">
+                <div className="flex space-x-8">
+                  <button
+                    onClick={() => setCallOutcomeFilter('all')}
+                    className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+                      callOutcomeFilter === 'all'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    All ({baseFilteredCalls.length})
+                  </button>
+                  <button
+                    onClick={() => setCallOutcomeFilter('followup')}
+                    className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+                      callOutcomeFilter === 'followup'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Follow-up ({(() => {
+                      const followUpCallIds = new Set(
+                        analyses
+                          .filter(a => {
+                            const hasFollowUp = a.follow_up_details && 
+                              a.follow_up_details.trim().length > 0 && 
+                              !a.follow_up_details.toLowerCase().includes('irrelevant according to transcript');
+                            return hasFollowUp && a.recordings?.call_history_id;
+                          })
+                          .map(a => a.recordings?.call_history_id)
+                          .filter(Boolean)
+                      );
+                      return baseFilteredCalls.filter(c => followUpCallIds.has(c.id)).length;
+                    })()})
+                  </button>
+                  <button
+                    onClick={() => setCallOutcomeFilter('Failed')}
+                    className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+                      callOutcomeFilter === 'Failed'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Failed ({baseFilteredCalls.filter(c => c.outcome === 'Failed').length})
+                  </button>
+                </div>
+              </div>
+
+              {/* Table */}
+              <div className="bg-white rounded-lg border">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-gray-50">
+                      <TableHead className="font-semibold">Name</TableHead>
+                      <TableHead className="font-semibold">Phone</TableHead>
+                      <TableHead className="font-semibold">Date</TableHead>
+                      <TableHead className="font-semibold">Duration</TableHead>
+                      <TableHead className="font-semibold">Disposition</TableHead>
+                      <TableHead className="font-semibold">Agent</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(() => {
+                      let filteredCalls = calls;
+                      if (callOutcomeFilter !== 'all') {
+                        if (callOutcomeFilter === 'followup') {
+                          const followUpCallIds = new Set(
+                            analyses
+                              .filter(a => {
+                                const hasFollowUp = a.follow_up_details && 
+                                  a.follow_up_details.trim().length > 0 && 
+                                  !a.follow_up_details.toLowerCase().includes('irrelevant according to transcript');
+                                return hasFollowUp && a.recordings?.call_history_id;
+                              })
+                              .map(a => a.recordings?.call_history_id)
+                              .filter(Boolean)
+                          );
+                          filteredCalls = filteredCalls.filter(call => followUpCallIds.has(call.id));
+                        } else {
+                          filteredCalls = filteredCalls.filter(call => call.outcome === callOutcomeFilter);
+                        }
+                      }
+
+                        // Manager filter: when admin selects a manager, show calls for
+                        // employees under that manager. The DB may store manager references
+                        // either as manager.id or manager.user_id on employee.manager_id,
+                        // and call.employees?.manager_id may use either as well. Try both.
+                        if (selectedManagerFilter && selectedManagerFilter !== 'all') {
+                          const managerUserId = managers.find(m => m.id === selectedManagerFilter)?.user_id;
+                          filteredCalls = filteredCalls.filter(call => {
+                            const callManagerId = call.employees?.manager_id;
+                            if (!callManagerId) {
+                              // fallback: try to find the employee record and check its manager
+                              const emp = employees.find(e => e.user_id === call.employee_id || e.id === call.employee_id);
+                              if (!emp) return false;
+                              return emp.manager_id === selectedManagerFilter || (managerUserId && emp.manager_id === managerUserId);
+                            }
+                            return callManagerId === selectedManagerFilter || (managerUserId && callManagerId === managerUserId);
+                          });
+                        }
+
+                        if (selectedEmployeeFilter && selectedEmployeeFilter !== 'all') {
+                        filteredCalls = filteredCalls.filter(call => call.employee_id === selectedEmployeeFilter);
+                      }
+
+                      if (callSearch && callSearch.trim() !== '') {
+                        const q = callSearch.trim().toLowerCase();
+                        filteredCalls = filteredCalls.filter(call => {
+                          const leadName = (call.leads?.name || '').toLowerCase();
+                          const contact = (call.leads?.contact || '').toLowerCase();
+                          return leadName.includes(q) || contact.includes(q);
+                        });
+                      }
+
+                      const now = new Date();
+                      if (callDateFilter === 'today') {
+                        const todayDateStr = now.toISOString().split('T')[0];
+                        filteredCalls = filteredCalls.filter(call => {
+                          if (!call.call_date) return false;
+                          const callDate = new Date(call.call_date);
+                          const callDateStr = callDate.toISOString().split('T')[0];
+                          return callDateStr === todayDateStr;
+                        });
+                      } else if (callDateFilter === 'yesterday') {
+                        const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+                        const yesterdayDateStr = yesterday.toISOString().split('T')[0];
+                        filteredCalls = filteredCalls.filter(call => {
+                          if (!call.call_date) return false;
+                          const callDate = new Date(call.call_date);
+                          const callDateStr = callDate.toISOString().split('T')[0];
+                          return callDateStr === yesterdayDateStr;
+                        });
+                      } else if (callDateFilter === 'week') {
+                        const dayOfWeek = now.getDay();
+                        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+                        const weekStart = new Date(now);
+                        weekStart.setDate(now.getDate() - daysFromMonday);
+                        weekStart.setHours(0, 0, 0, 0);
+                        const weekEnd = new Date(weekStart);
+                        weekEnd.setDate(weekStart.getDate() + 4);
+                        weekEnd.setHours(23, 59, 59, 999);
+                        filteredCalls = filteredCalls.filter(call => {
+                          const callTime = new Date(call.call_date || call.created_at).getTime();
+                          return callTime >= weekStart.getTime() && callTime <= weekEnd.getTime();
+                        });
+                      } else if (callDateFilter === 'month') {
+                        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+                        monthStart.setHours(0, 0, 0, 0);
+                        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                        monthEnd.setHours(23, 59, 59, 999);
+                        filteredCalls = filteredCalls.filter(call => {
+                          const callTime = new Date(call.call_date || call.created_at).getTime();
+                          return callTime >= monthStart.getTime() && callTime <= monthEnd.getTime();
+                        });
+                      }
+
+                      if (callSortBy === 'date') {
+                        filteredCalls.sort((a: any, b: any) => {
+                          const at = new Date(a.call_date || a.created_at).getTime();
+                          const bt = new Date(b.call_date || b.created_at).getTime();
+                          return callSortOrder === 'asc' ? at - bt : bt - at;
+                        });
+                      } else if (callSortBy === 'duration') {
+                        filteredCalls.sort((a: any, b: any) => {
+                          const ad = a.exotel_duration || 0;
+                          const bd = b.exotel_duration || 0;
+                          return callSortOrder === 'asc' ? ad - bd : bd - ad;
+                        });
+                      } else if (callSortBy === 'agent') {
+                        filteredCalls.sort((a: any, b: any) => {
+                          const an = (a.employees?.full_name || '').toLowerCase();
+                          const bn = (b.employees?.full_name || '').toLowerCase();
+                          if (an < bn) return callSortOrder === 'asc' ? -1 : 1;
+                          if (an > bn) return callSortOrder === 'asc' ? 1 : -1;
+                          return 0;
+                        });
+                      }
+
+                      if (filteredCalls.length === 0) {
+                        return (
+                          <TableRow>
+                            <TableCell colSpan={6} className="h-32">
+                              <div className="text-center">
+                                <PhoneCall className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                                <p className="text-muted-foreground">
+                                  {calls.length === 0 ? 'No calls made yet' : 'No calls match the selected filters'}
+                                </p>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }
+
+                      return filteredCalls.map((call) => {
+                        const disposition = call.outcome || 'unknown';
+
+                        const getDispositionStyle = (outcome: string) => {
+                          switch (outcome) {
+                            case 'converted':
+                              return 'text-green-600 bg-green-50 border-green-200';
+                            case 'follow_up':
+                              return 'text-orange-600 bg-orange-50 border-orange-200';
+                            case 'rejected':
+                              return 'text-red-600 bg-red-50 border-red-200';
+                            case 'not_answered':
+                              return 'text-gray-600 bg-gray-50 border-gray-200';
+                            default:
+                              return 'text-blue-600 bg-blue-50 border-blue-200';
+                          }
+                        };
+
+                        const getDispositionLabel = (outcome: string) => {
+                          switch (outcome) {
+                            case 'converted':
+                              return 'Converted';
+                            case 'follow_up':
+                              return 'Follow-up';
+                            case 'rejected':
+                              return 'Rejected';
+                            case 'not_answered':
+                              return 'Not Answered';
+                            default:
+                              return outcome.charAt(0).toUpperCase() + outcome.slice(1).replace('_', ' ');
+                          }
+                        };
+
+                        return (
+                          <TableRow key={call.id} className="hover:bg-gray-50">
+                            <TableCell>
+                              <div className="font-medium"><b>{call.leads?.name || 'Unknown'}</b></div>
+                            </TableCell>
+                            <TableCell className="text-gray-600">
+                              {call.leads?.contact || 'N/A'}
+                            </TableCell>
+                            <TableCell className="text-gray-600">
+                              <div>{new Date(call.created_at).toLocaleDateString('en-GB')}</div>
+                              <div className="text-sm text-gray-500">
+                                {new Date(call.created_at).toLocaleTimeString('en-GB', { 
+                                  hour: '2-digit', 
+                                  minute: '2-digit' 
+                                })}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-gray-600">
+                              {call.exotel_duration ? (
+                                <div className="text-sm">
+                                  {Math.floor(call.exotel_duration / 60)}m {call.exotel_duration % 60}s
+                                </div>
+                              ) : (
+                                <span className="text-gray-400 text-sm">--</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getDispositionStyle(disposition)}`}>
+                                {getDispositionLabel(disposition)}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-gray-600">
+                              <div className="flex items-center justify-end gap-4">
+                                <span className="text-sm">{call.employees?.full_name || 'Unknown'}</span>
+                                <Button size="sm" variant="outline" className="gap-2" onClick={() => { setSelectedCallForDetails(call); setIsCallDetailsModalOpen(true); }}>
+                                  <Eye className="h-4 w-4" />
+                                  Details
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      });
+                    })()}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Call Details Dialog */}
+              <Dialog open={isCallDetailsModalOpen} onOpenChange={setIsCallDetailsModalOpen}>
+                <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Call Details</DialogTitle>
+                    <p className="text-muted-foreground">Basic information about this call</p>
+                  </DialogHeader>
+                  {selectedCallForDetails && (
+                    <div className="space-y-6">
+                      <div className="border rounded-lg p-4 bg-blue-50">
+                        <h3 className="font-semibold text-lg mb-3 flex items-center gap-2">
+                          <User className="h-5 w-5" />
+                          Candidate Details
+                        </h3>
+                        <div className="space-y-2">
+                          <div className="flex items-start gap-2">
+                            <span className="text-sm font-medium text-gray-600 min-w-[100px]">Name:</span>
+                            <span className="text-sm text-gray-900">{selectedCallForDetails.leads?.name || 'N/A'}</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-sm font-medium text-gray-600 min-w-[100px]">Email:</span>
+                            <span className="text-sm text-gray-900">{selectedCallForDetails.leads?.email || 'N/A'}</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-sm font-medium text-gray-600 min-w-[100px]">Contact:</span>
+                            <span className="text-sm text-gray-900">{selectedCallForDetails.leads?.contact || 'N/A'}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="border rounded-lg p-4 bg-purple-50">
+                        <h3 className="font-semibold text-lg mb-3 flex items-center gap-2">
+                          <PhoneCall className="h-5 w-5" />
+                          Call Information
+                        </h3>
+                        <div className="space-y-2">
+                          <div className="flex items-start gap-2">
+                            <span className="text-sm font-medium text-gray-600 min-w-[100px]">Date:</span>
+                            <span className="text-sm text-gray-900">
+                              {selectedCallForDetails.call_date 
+                                ? new Date(selectedCallForDetails.call_date).toLocaleString('en-IN', { 
+                                    timeZone: 'Asia/Kolkata',
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    second: '2-digit'
+                                  })
+                                : 'N/A'}
+                            </span>
+                          </div>
+                          {selectedCallForDetails.exotel_duration && (
+                            <div className="flex items-start gap-2">
+                              <span className="text-sm font-medium text-gray-600 min-w-[100px]">Duration:</span>
+                              <span className="text-sm text-gray-900">
+                                {Math.floor(selectedCallForDetails.exotel_duration / 60)}m {selectedCallForDetails.exotel_duration % 60}s
+                              </span>
+                            </div>
+                          )}
+                          <div className="flex items-start gap-2">
+                            <span className="text-sm font-medium text-gray-600 min-w-[100px]">Outcome:</span>
+                            <Badge variant={
+                              selectedCallForDetails.outcome === 'completed' ? 'default' :
+                              selectedCallForDetails.outcome === 'interested' ? 'default' :
+                              selectedCallForDetails.outcome === 'converted' ? 'default' :
+                              selectedCallForDetails.outcome === 'not_interested' ? 'destructive' :
+                              selectedCallForDetails.outcome === 'follow_up' ? 'secondary' :
+                              'outline'
+                            }>
+                              {selectedCallForDetails.outcome?.replace('_', ' ').toUpperCase()}
+                            </Badge>
+                          </div>
+                          {selectedCallForDetails.notes && (
+                            <div className="flex items-start gap-2">
+                              <span className="text-sm font-medium text-gray-600 min-w-[100px]">Notes:</span>
+                              <span className="text-sm text-gray-900">{selectedCallForDetails.notes}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {selectedCallForDetails.exotel_recording_url && (
+                        <div className="border rounded-lg p-4 bg-orange-50">
+                          <h3 className="font-semibold text-lg mb-3 flex items-center gap-2">
+                            <Headphones className="h-5 w-5" />
+                            Recording
+                          </h3>
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium text-gray-600">URL:</span>
+                              <a 
+                                href={selectedCallForDetails.exotel_recording_url} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+                              >
+                                Open Recording
+                                <LinkIcon className="h-3 w-3" />
+                              </a>
+                            </div>
+                            <audio controls className="w-full mt-2">
+                              <source src={selectedCallForDetails.exotel_recording_url} type="audio/mpeg" />
+                              Your browser does not support the audio element.
+                            </audio>
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedCallForDetails.next_follow_up && (
+                        <div className="border rounded-lg p-4 bg-yellow-50">
+                          <h3 className="font-semibold text-lg mb-3 flex items-center gap-2">
+                            <Calendar className="h-5 w-5" />
+                            Follow-up
+                          </h3>
+                          <div className="space-y-2">
+                            <div className="flex items-start gap-2">
+                              <span className="text-sm font-medium text-gray-600 min-w-[100px]">Date:</span>
+                              <span className="text-sm text-gray-900">
+                                {new Date(selectedCallForDetails.next_follow_up).toLocaleDateString('en-IN', {
+                                  year: 'numeric',
+                                  month: 'long',
+                                  day: 'numeric'
+                                })}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-2 mt-6">
+                    <Button variant="outline" onClick={() => setIsCallDetailsModalOpen(false)}>
+                      Close
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
             </div>
           )}
 
