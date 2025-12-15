@@ -69,7 +69,7 @@ export default function ManagerProfilePage({ onBack }: ManagerProfilePageProps) 
       // Fetch manager profile from managers table
       const { data: managerData, error: managerError } = await supabase
         .from('managers')
-        .select('*')
+        .select('id, user_id, full_name, email, contact_number, phone, department, is_active, created_at, updated_at')
         .eq('user_id', user.id)
         .single();
 

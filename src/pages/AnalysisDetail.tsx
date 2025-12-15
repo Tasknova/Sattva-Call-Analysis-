@@ -26,7 +26,9 @@ export default function AnalysisDetail() {
         // Fetch analysis
         const { data: analysisData, error: analysisError } = await supabase
           .from('analyses')
-          .select('*')
+          .select(
+            'id, recording_id, user_id, participants_count, participants_names, closure_probability, closure_probability_reasoning, recruiter_process_score, candidate_acceptance_risk, candidate_acceptance_risk_reasoning, recruiter_confidence_score, purpose_of_call, exec_summary, next_steps, ai_feedback_for_recruiter, outcome, objections_detected, objections_handeled, additional_details, follow_up_details, objections_raised, objections_handled, call_quality_score, script_adherence, compilience_expections_score, sentiment_score, engagement_score, confidence_score_executive, confidence_score_person, improvements, call_outcome, created_at'
+          )
           .eq('id', id)
           .single();
 
@@ -35,7 +37,7 @@ export default function AnalysisDetail() {
         // Fetch recording
         const { data: recordingData, error: recordingError } = await supabase
           .from('recordings')
-          .select('*')
+          .select('id, user_id, lead_id, call_history_id, file_name, recording_url, status, duration_seconds, transcript, created_at, updated_at')
           .eq('id', analysisData.recording_id)
           .single();
 

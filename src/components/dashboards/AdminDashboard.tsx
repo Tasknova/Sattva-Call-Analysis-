@@ -348,7 +348,7 @@ export default function AdminDashboard() {
     try {
       const { data, error } = await supabase
         .from('admins')
-        .select('*')
+        .select('id, user_id, full_name, email, phone, department, is_active, created_at, updated_at')
         .eq('user_id', user.id)
         .single();
 
@@ -428,7 +428,7 @@ export default function AdminDashboard() {
       // Fetch managers from managers table
       const { data: managersData, error: managersError } = await supabase
         .from('managers')
-        .select('*')
+        .select('id, user_id, company_id, full_name, email, department, password, is_active, created_at, updated_at')
         .eq('company_id', userRole.company_id)
         .eq('is_active', true);
 
@@ -444,7 +444,16 @@ export default function AdminDashboard() {
       const { data: employeesData, error: employeesError } = await supabase
         .from('employees')
         .select(`
-          *,
+          id,
+          user_id,
+          company_id,
+          full_name,
+          email,
+          password,
+          manager_id,
+          is_active,
+          created_at,
+          updated_at,
           manager:managers!manager_id(full_name, department)
         `)
         .eq('company_id', userRole.company_id)
@@ -505,7 +514,7 @@ export default function AdminDashboard() {
       // Fetch all leads for this company
       const { data: leadsData, error: leadsError } = await supabase
         .from('leads')
-        .select('*')
+        .select('id, user_id, assigned_to, name, email, contact, status, description, group_id, client_id, job_id, created_at, updated_at')
         .eq('company_id', userRole.company_id);
 
       if (leadsError) {
@@ -558,7 +567,7 @@ export default function AdminDashboard() {
       // Fetch all lead groups for this company
       const { data: leadGroupsData, error: leadGroupsError } = await supabase
         .from('lead_groups')
-        .select('*')
+        .select('id, user_id, group_name, assigned_to, company_id, created_at, updated_at')
         .eq('company_id', userRole.company_id)
         .order('created_at', { ascending: false });
 
@@ -586,7 +595,7 @@ export default function AdminDashboard() {
       // Fetch employee daily productivity data
       const { data: productivityData, error: productivityError } = await supabase
         .from('employee_daily_productivity')
-        .select('*')
+        .select('id, employee_id, company_id, date, total_calls, completed_calls, follow_up_calls, not_answered_calls, created_at')
         .eq('company_id', userRole.company_id)
         .order('date', { ascending: false });
 
@@ -601,7 +610,7 @@ export default function AdminDashboard() {
       const employeeUserIds = employeesData?.map(emp => emp.user_id) || [];
       const { data: rawAnalysesData, error: analysesError } = await supabase
         .from('analyses')
-        .select(`*, recordings ( id, file_name, recording_url, status, call_history_id )`)
+        .select(`id, recording_id, user_id, call_id, status, call_quality_score, sentiment_score, engagement_score, created_at, recordings ( id, file_name, recording_url, status, call_history_id )`)
         .in('user_id', employeeUserIds);
 
       let analysesData = rawAnalysesData as any[] | null;
@@ -653,7 +662,7 @@ export default function AdminDashboard() {
     try {
       const { data, error } = await supabase
         .from('company_settings')
-        .select('*')
+        .select('id, company_id, caller_id, from_numbers, created_at, updated_at')
         .eq('company_id', userRole.company_id)
         .single();
 
@@ -740,7 +749,7 @@ export default function AdminDashboard() {
       // Check if number already exists
       const { data: existing, error: checkError } = await supabase
         .from('phone_numbers')
-        .select('*')
+        .select('id, company_id, phone_number, employee_id, manager_id, is_active, created_at, updated_at')
         .eq('company_id', userRole.company_id)
         .eq('phone_number', trimmedNumber);
 

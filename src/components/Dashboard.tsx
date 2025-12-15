@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense, lazy } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,9 +9,9 @@ import { useDashboardStats, useRecordings, useAnalyses, useDeleteRecording } fro
 import AddRecordingModal from "./AddRecordingModal";
 import AllLeadsPage from "./AllLeadsPage";
 import LeadGroupsPage from "./LeadGroupsPage";
-import AdminDashboard from "./dashboards/AdminDashboard";
-import ManagerDashboard from "./dashboards/ManagerDashboard";
-import EmployeeDashboard from "./dashboards/EmployeeDashboard";
+const AdminDashboard = lazy(() => import("./dashboards/AdminDashboard"));
+const ManagerDashboard = lazy(() => import("./dashboards/ManagerDashboard"));
+const EmployeeDashboard = lazy(() => import("./dashboards/EmployeeDashboard"));
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 // import { useAnalysisNotifications } from "@/hooks/useAnalysisNotifications";
@@ -33,17 +33,29 @@ export default function Dashboard({ onShowProfile }: DashboardProps) {
   // Route to appropriate dashboard based on user role
   if (userRole?.role === 'admin') {
     console.log('Routing to AdminDashboard');
-    return <AdminDashboard />;
+    return (
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading dashboard...</div>}>
+        <AdminDashboard />
+      </Suspense>
+    );
   }
-  
+
   if (userRole?.role === 'manager') {
     console.log('Routing to ManagerDashboard');
-    return <ManagerDashboard />;
+    return (
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading dashboard...</div>}>
+        <ManagerDashboard />
+      </Suspense>
+    );
   }
-  
+
   if (userRole?.role === 'employee') {
     console.log('Routing to EmployeeDashboard');
-    return <EmployeeDashboard />;
+    return (
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading dashboard...</div>}>
+        <EmployeeDashboard />
+      </Suspense>
+    );
   }
   
   // Fallback to original dashboard if role is not recognized

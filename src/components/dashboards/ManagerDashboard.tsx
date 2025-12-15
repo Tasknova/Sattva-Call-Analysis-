@@ -455,7 +455,7 @@ export default function ManagerDashboard() {
       // First, get the manager's data
       const { data: managerData, error: managerError } = await supabase
         .from('managers')
-        .select('*')
+        .select('id, user_id, company_id, full_name, email, created_at')
         .eq('user_id', userRole.user_id)
         .eq('company_id', userRole.company_id)
         .single();
@@ -502,7 +502,7 @@ export default function ManagerDashboard() {
       // Fetch employees under this manager (exclude the manager themselves)
       const { data: employeesData, error: employeesError } = await supabase
         .from('employees')
-        .select('*')
+        .select('id, user_id, email, full_name, phone, is_active, created_at, updated_at')
         .eq('company_id', userRole.company_id)
         .eq('manager_id', managerData.id)
         .eq('is_active', true)
@@ -526,7 +526,7 @@ export default function ManagerDashboard() {
       // Fetch lead groups assigned to this manager
       const { data: leadGroupsData, error: leadGroupsError } = await supabase
         .from('lead_groups')
-        .select('*')
+        .select('id, user_id, group_name, assigned_to, company_id, created_at, updated_at')
         .eq('assigned_to', managerData.id)
         .eq('company_id', userRole.company_id);
 
@@ -549,7 +549,7 @@ export default function ManagerDashboard() {
         console.log('Manager Dashboard - Fetching calls for employee user_ids:', employeeUserIds);
         const { data, error } = await supabase
           .from('call_history')
-          .select('*, leads(name, email, contact), employees(full_name, email)')
+          .select('id, lead_id, employee_id, company_id, outcome, notes, call_date, next_follow_up, created_at, exotel_call_sid, exotel_recording_url, exotel_duration, leads(name, email, contact), employees(full_name, email)')
           .in('employee_id', employeeUserIds)
           .eq('company_id', userRole.company_id)
           .order('created_at', { ascending: false });
@@ -576,7 +576,7 @@ export default function ManagerDashboard() {
         console.log('Manager Dashboard - Fetching call outcomes for employee ids:', employeeIds);
         const { data, error } = await supabase
           .from('call_outcomes')
-          .select('*')
+          .select('id, lead_id, employee_id, outcome, call_date, created_at')
           .in('employee_id', employeeIds)
           .eq('company_id', userRole.company_id);
         callOutcomesData = data;

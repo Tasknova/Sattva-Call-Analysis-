@@ -355,7 +355,7 @@ export default function EmployeeDashboard() {
       const [callsResult, employeeResult] = await Promise.all([
         supabase
           .from('call_history')
-          .select('*')
+          .select('id, lead_id, employee_id, company_id, outcome, notes, call_date, next_follow_up, created_at, exotel_call_sid, exotel_recording_url, exotel_duration')
           .eq('employee_id', userRole.user_id)
           .order('created_at', { ascending: false })
           .limit(500), // Limit to recent 500 calls for performance
@@ -389,7 +389,7 @@ export default function EmployeeDashboard() {
 
       if (calledLeadIds.length > 0 || userRole?.user_id || employeeRecord?.id) {
         // Build OR query to fetch all relevant leads in one go
-        let leadsQuery = supabase.from('leads').select('*');
+        let leadsQuery = supabase.from('leads').select('id, user_id, assigned_to, name, email, contact, status, description, group_id, client_id, job_id, created_at, updated_at');
         
         if (calledLeadIds.length > 0) {
           leadsQuery = leadsQuery.or(`id.in.(${calledLeadIds.join(',')}),assigned_to.eq.${userRole.user_id}${employeeRecord?.id ? `,assigned_to.eq.${employeeRecord.id}` : ''}`);
@@ -419,7 +419,7 @@ export default function EmployeeDashboard() {
         if (leadGroupIds.length > 0) {
           const { data: leadGroupsData, error: leadGroupsError } = await supabase
             .from('lead_groups')
-            .select('*')
+            .select('id, user_id, group_name, assigned_to, company_id, created_at, updated_at')
             .in('id', leadGroupIds);
 
           if (leadGroupsError) {
@@ -680,7 +680,7 @@ export default function EmployeeDashboard() {
         // Don't await - fetch in background
         supabase
           .from('employee_daily_productivity')
-          .select('*')
+          .select('id, employee_id, company_id, date, login_time, logout_time, total_calls, created_at')
           .eq('employee_id', employeeData.id)
           .gte('date', startOfMonth.toISOString().split('T')[0])
           .order('date', { ascending: true })
@@ -968,7 +968,7 @@ Please provide insights that are specific, actionable, and tailored to these met
       // Step 1: Check if recording already exists for this call (auto-created by trigger)
       let { data: existingRecording, error: recordingCheckError } = await supabase
         .from('recordings')
-        .select('*')
+        .select('id, user_id, company_id, stored_file_url, recording_url, file_name, status, duration_seconds, transcript, call_history_id, created_at, updated_at')
         .eq('user_id', userRole?.user_id)
         .eq('stored_file_url', recordingUrl)
         .maybeSingle();
@@ -1001,7 +1001,7 @@ Please provide insights that are specific, actionable, and tailored to these met
       // Step 2: Check if analysis already exists for this call
       let { data: existingAnalysis, error: analysisCheckError } = await supabase
         .from('analyses')
-        .select('*')
+        .select('id, recording_id, call_id, user_id, company_id, status, sentiment_score, engagement_score, confidence_score_executive, confidence_score_person, objections_handled, next_steps, improvements, call_outcome, detailed_call_analysis, short_summary, created_at')
         .eq('call_id', call.id)
         .maybeSingle();
 
@@ -1312,7 +1312,7 @@ Please provide insights that are specific, actionable, and tailored to these met
       // Get employee's assigned phone number from phone_numbers table
       const { data, error } = await supabase
         .from('phone_numbers')
-        .select('*')
+        .select('id, company_id, employee_id, phone_number, is_active, manager_id, created_at, updated_at')
         .eq('employee_id', userRole.id)
         .eq('is_active', true)
         .single();
@@ -1352,7 +1352,7 @@ Please provide insights that are specific, actionable, and tailored to these met
     try {
       const { data, error } = await supabase
         .from('company_settings')
-        .select('*')
+        .select('id, company_id, caller_id, from_numbers, created_at, updated_at')
         .eq('company_id', userRole.company_id)
         .single();
 
@@ -3773,7 +3773,7 @@ Please provide insights that are specific, actionable, and tailored to these met
                 setCallOutcomeStatus(value);
                 // Fetch clients when converted is selected
                 if (value === 'converted') {
-                  supabase.from('clients').select('*').eq('company_id', userRole?.company_id).then(({ data }) => {
+                  supabase.from('clients').select('id, company_id, name, industry, contact_person, email, phone, is_active, created_at').eq('company_id', userRole?.company_id).then(({ data }) => {
                     setClients(data || []);
                   });
                 }
@@ -3796,7 +3796,7 @@ Please provide insights that are specific, actionable, and tailored to these met
                   <Select value={selectedClient} onValueChange={(value) => {
                     setSelectedClient(value);
                     // Fetch jobs for selected client
-                    supabase.from('jobs').select('*').eq('client_id', value).eq('is_active', true).then(({ data }) => {
+                    supabase.from('jobs').select('id, client_id, title, description, is_active, created_at').eq('client_id', value).eq('is_active', true).then(({ data }) => {
                       setJobs(data || []);
                     });
                   }}>

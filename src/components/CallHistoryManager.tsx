@@ -165,17 +165,20 @@ export default function CallHistoryManager({ companyId, managerId }: CallHistory
           const { data: callsResult, error: callsResultError } = await supabase
             .from('call_history')
             .select(`
-              *,
-              leads (
-                name,
-                email,
-                contact
-              ),
-              employees (
-                full_name,
-                email
-              )
-            `)
+                id,
+                lead_id,
+                employee_id,
+                company_id,
+                outcome,
+                notes,
+                call_date,
+                next_follow_up,
+                created_at,
+                exotel_call_sid,
+                exotel_recording_url,
+                leads (name, email, contact),
+                employees (full_name, email)
+              `)
             .in('employee_id', employeeUserIds)
             .order('created_at', { ascending: false });
           
@@ -196,20 +199,19 @@ export default function CallHistoryManager({ companyId, managerId }: CallHistory
         const { data: callsResult, error: callsResultError } = await supabase
           .from('call_history')
           .select(`
-            *,
-            leads (
-              name,
-              email,
-              contact
-            ),
-            employees (
-              full_name,
-              email,
-              manager_id,
-              managers:manager_id (
-                full_name
-              )
-            )
+            id,
+            lead_id,
+            employee_id,
+            company_id,
+            outcome,
+            notes,
+            call_date,
+            next_follow_up,
+            created_at,
+            exotel_call_sid,
+            exotel_recording_url,
+            leads (name, email, contact),
+            employees (full_name, email, manager_id, managers:manager_id (full_name))
           `)
           .eq('company_id', userRole.company_id)
           .order('created_at', { ascending: false});
@@ -242,14 +244,22 @@ export default function CallHistoryManager({ companyId, managerId }: CallHistory
       const { data: analysesData, error: analysesError } = await supabase
         .from('analyses')
         .select(`
-          *,
-          recordings (
-            id,
-            file_name,
-            recording_url,
-            status,
-            call_history_id
-          )
+          id,
+          recording_id,
+          call_id,
+          user_id,
+          status,
+          sentiment_score,
+          engagement_score,
+          confidence_score_executive,
+          confidence_score_person,
+          detailed_call_analysis,
+          objections_raised,
+          objections_handled,
+          next_steps,
+          improvements,
+          created_at,
+          recordings (id, file_name, recording_url, status, call_history_id)
         `)
         .in('user_id', employeeUserIds);
 
@@ -325,7 +335,7 @@ export default function CallHistoryManager({ companyId, managerId }: CallHistory
       // Step 1: Check if recording already exists for this call (auto-created by trigger)
       let { data: existingRecording, error: recordingCheckError } = await supabase
         .from('recordings')
-        .select('*')
+        .select('id, user_id, company_id, stored_file_url, recording_url, file_name, status, duration_seconds, transcript, call_history_id, created_at, updated_at')
         .eq('user_id', call.employee_id)
         .eq('stored_file_url', recordingUrl)
         .maybeSingle();
@@ -358,7 +368,7 @@ export default function CallHistoryManager({ companyId, managerId }: CallHistory
       // Step 2: Check if analysis already exists for this call
       let { data: existingAnalysis, error: analysisCheckError } = await supabase
         .from('analyses')
-        .select('*')
+        .select('id, recording_id, call_id, user_id, company_id, status, sentiment_score, engagement_score, confidence_score_executive, confidence_score_person, objections_handled, next_steps, improvements, call_outcome, detailed_call_analysis, short_summary, created_at')
         .eq('call_id', call.id)
         .maybeSingle();
 
