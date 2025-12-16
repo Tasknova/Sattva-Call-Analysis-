@@ -4,70 +4,78 @@
 
 **URL**: https://lovable.dev/projects/664d4fa2-480f-4f40-bf37-9a89b1686646
 
-## How can I edit this code?
+**Sattva — Call Analysis Dashboard**
 
-There are several ways of editing your application.
+- **Project**: Sattva Call Analysis — call recording ingestion, transcription, AI analysis, and team dashboards.
+- **Stack**: Vite + React + TypeScript, Tailwind CSS, shadcn-ui, Supabase (Postgres + Functions).
 
-**Use Lovable**
+**Getting Started**
+- **Prerequisites**: Node.js (18+ recommended), npm.
+- **Install**: `npm ci` or `npm install`.
+- **Run (dev)**: `npm run dev` — starts Vite dev server on localhost.
+- **Build (prod)**: `npm run build` — produces `dist/` for production.
+- **Preview**: `npm run preview` — preview production build locally.
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/664d4fa2-480f-4f40-bf37-9a89b1686646) and start prompting.
+**Environment**
+- This app uses Vite env vars with the `VITE_` prefix. Create a `.env` file (not committed) in project root with at least:
 
-Changes made via Lovable will be committed automatically to this repo.
+	- `VITE_SUPABASE_URL` — your Supabase project URL
+	- `VITE_SUPABASE_ANON_KEY` — your Supabase anon/public key
 
-**Use your preferred IDE**
+	Example `.env`:
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+	```env
+	VITE_SUPABASE_URL=https://xyzcompany.supabase.co
+	VITE_SUPABASE_ANON_KEY=eyJ...your_key_here
+	```
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+- The Supabase client is configured in [src/lib/supabase.ts](src/lib/supabase.ts) and falls back to an embedded demo URL/key if env vars are not set.
 
-Follow these step:
+**Database & Serverless**
+- Database migrations and SQL helpers are under the `db/` folder and `supabase/migrations/`.
+- Edge function and webhook helpers live in `supabase/functions/` (e.g., `webhook-call-capture`, `exotel-proxy`).
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+**Key Source Paths**
+- UI entry: `src/main.tsx` and `src/App.tsx`
+- Pages: `src/pages/` (analysis, call details, auth callbacks)
+- Dashboards & components: `src/components/` (dashboards, tabs, modals)
+- Supabase client & types: [src/lib/supabase.ts](src/lib/supabase.ts)
+- Scripts: `scripts/` (utility scripts used in project workflows)
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+**Scripts**
+- `npm run dev` — start dev server
+- `npm run build` — production build
+- `npm run build:dev` — build using development mode
+- `npm run preview` — preview built production bundle
+- `npm run lint` — run ESLint
 
-# Step 3: Install the necessary dependencies.
-npm i
+**Common Tasks**
+- Add or update env vars: create `.env` and restart `npm run dev`.
+- Rebuild production assets after source edits: `npm run build`.
+- If you change database structure, add migrations under `db/migrations/` and update Supabase functions as needed.
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+**Notes & Troubleshooting**
+- If you see runtime DB errors about column names, confirm your Supabase schema matches the queries. The client expects column names used across `src/` (some legacy/compat fallbacks exist).
+- For JSX/TS syntax errors during build, run `npm run dev` and check Vite/terminal output for file and line numbers.
 
-**Edit a file directly in GitHub**
+**Deployment**
+- This project can be deployed to Vercel, Netlify, or any static host that serves the `dist/` output and provides env var configuration for `VITE_` keys.
+- If you use Supabase Edge Functions, deploy them via the Supabase CLI or the Supabase dashboard.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+**Contributing**
+- Fork or branch, make changes, and open a PR. Follow existing TypeScript and Tailwind conventions.
 
-**Use GitHub Codespaces**
+**License**
+- No license file is present in this repo. Add a `LICENSE` if you wish to apply one.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+**Contacts**
+- Repo maintainer(s): check the repository settings or project owner for contact details.
 
-## What technologies are used for this project?
+---
 
-This project is built with:
+If you'd like, I can also:
+- Add a `.env.example` with the Vite env vars,
+- Add a short `CONTRIBUTING.md` or `DEVELOPMENT.md` with common debugging steps,
+- Run `npm run build` here to verify the codebase builds cleanly.
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/664d4fa2-480f-4f40-bf37-9a89b1686646) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+Tell me which of those you'd like next.
