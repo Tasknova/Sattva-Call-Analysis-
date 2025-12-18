@@ -19,7 +19,11 @@ import {
   User,
   Target,
   Award,
-  Activity
+  Activity,
+  ChevronDown,
+  ChevronUp,
+  MessageSquare,
+  ThumbsUp
 } from "lucide-react";
 
 interface Manager {
@@ -56,36 +60,65 @@ interface AnalysisStats {
 export default function AdminReportsPage() {
   const { userRole, company } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [timePeriod, setTimePeriod] = useState<'daily' | 'weekly' | 'monthly'>('monthly');
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'this_week' | 'this_month' | 'custom'>('this_month');
+  const [customDateRange, setCustomDateRange] = useState({ startDate: '', endDate: '' });
   const [managers, setManagers] = useState<Manager[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [managerStats, setManagerStats] = useState<Map<string, any>>(new Map());
   const [employeeStats, setEmployeeStats] = useState<Map<string, any>>(new Map());
   const [companyOverview, setCompanyOverview] = useState<any>(null);
+  const [expandedManagers, setExpandedManagers] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (userRole?.company_id) {
       fetchReportData();
     }
-  }, [userRole, timePeriod, selectedDate]);
+  }, [userRole, dateFilter, customDateRange]);
+
+  const toggleManagerExpanded = (managerId: string) => {
+    setExpandedManagers(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(managerId)) {
+        newSet.delete(managerId);
+      } else {
+        newSet.add(managerId);
+      }
+      return newSet;
+    });
+  };
 
   const getDateRange = () => {
-    const date = new Date(selectedDate);
+    const now = new Date();
     let startDate: Date;
-    let endDate = new Date(date);
+    let endDate = new Date();
     endDate.setHours(23, 59, 59, 999);
 
-    if (timePeriod === 'daily') {
-      startDate = new Date(date);
+    if (dateFilter === 'today') {
+      startDate = new Date();
       startDate.setHours(0, 0, 0, 0);
-    } else if (timePeriod === 'weekly') {
-      startDate = new Date(date);
-      startDate.setDate(date.getDate() - 7);
+    } else if (dateFilter === 'yesterday') {
+      startDate = new Date();
+      startDate.setDate(now.getDate() - 1);
       startDate.setHours(0, 0, 0, 0);
+      endDate = new Date();
+      endDate.setDate(now.getDate() - 1);
+      endDate.setHours(23, 59, 59, 999);
+    } else if (dateFilter === 'this_week') {
+      startDate = new Date();
+      startDate.setDate(now.getDate() - 7);
+      startDate.setHours(0, 0, 0, 0);
+    } else if (dateFilter === 'this_month') {
+      startDate = new Date();
+      startDate.setDate(now.getDate() - 30);
+      startDate.setHours(0, 0, 0, 0);
+    } else if (dateFilter === 'custom' && customDateRange.startDate && customDateRange.endDate) {
+      startDate = new Date(customDateRange.startDate);
+      startDate.setHours(0, 0, 0, 0);
+      endDate = new Date(customDateRange.endDate);
+      endDate.setHours(23, 59, 59, 999);
     } else {
-      startDate = new Date(date);
-      startDate.setDate(date.getDate() - 30);
+      startDate = new Date();
+      startDate.setDate(now.getDate() - 30);
       startDate.setHours(0, 0, 0, 0);
     }
 
@@ -104,8 +137,8 @@ export default function AdminReportsPage() {
       
       console.log('==================== ADMIN REPORTS DATA FETCH ====================');
       console.log('Fetching report data for company_id:', userRole.company_id);
-      console.log('Time Period:', timePeriod);
-      console.log('Selected Date:', selectedDate);
+      console.log('Date Filter:', dateFilter);
+      console.log('Custom Date Range:', customDateRange);
       console.log('Date range:', { 
         startDate, 
         endDate,
@@ -165,13 +198,12 @@ export default function AdminReportsPage() {
         created_at_local: new Date(c.created_at).toLocaleString()
       })));
 
-      // Fetch analyses for the period
+      // Fetch analyses for the period (simplified query without company_id)
+      const callIds = (callsData || []).map(call => call.id);
       const { data: analysesData, error: analysesError } = await supabase
         .from('analyses')
         .select('*')
-        .eq('company_id', userRole.company_id)
-        .gte('created_at', startDate)
-        .lte('created_at', endDate);
+        .in('call_id', callIds);
 
       if (analysesError) {
         console.error('Error fetching analyses:', analysesError);
@@ -205,22 +237,40 @@ export default function AdminReportsPage() {
         }) || [];
 
         const completedAnalyses = managerAnalyses.filter(a => a.status?.toLowerCase() === 'completed');
+        
+        // Calculate talk time metrics for manager's team
+        const validCallsForAvg = managerCalls.filter(call => (call.exotel_duration || 0) >= 45);
+        const totalTalkTimeSeconds = managerCalls.reduce((sum, call) => sum + (Number(call.exotel_duration) || 0), 0);
+        const avgTalkTimeSeconds = validCallsForAvg.length > 0 
+          ? validCallsForAvg.reduce((sum, call) => sum + (Number(call.exotel_duration) || 0), 0) / validCallsForAvg.length 
+          : 0;
+        
+        // Format talk time as MM:SS
+        const formatTime = (seconds: number) => {
+          const mins = Math.floor(seconds / 60);
+          const secs = Math.floor(seconds % 60);
+          return `${mins}:${secs.toString().padStart(2, '0')}`;
+        };
 
         managerStatsMap.set(manager.id, {
           total_employees: managerEmployees.length,
           total_calls: managerCalls.length,
           completed_calls: managerCalls.filter(c => c.outcome === 'completed' || c.outcome === 'converted').length,
-          follow_up_calls: managerCalls.filter(c => c.outcome === 'follow_up').length,
-          not_interested: managerCalls.filter(c => c.outcome === 'not_interested' || c.outcome === 'rejected').length,
-          conversion_rate: managerCalls.length > 0 ? 
+          total_relevant: managerCalls.filter(c => (c.exotel_duration || 0) >= 30).length,
+          total_irrelevant: managerCalls.filter(c => (c.exotel_duration || 0) < 30).length,
+          total_analyzed: completedAnalyses.length,
+          avg_talk_time: formatTime(avgTalkTimeSeconds),
+          total_talk_time: formatTime(totalTalkTimeSeconds),
+          success_rate: managerCalls.length > 0 ? 
             ((managerCalls.filter(c => c.outcome === 'completed' || c.outcome === 'converted').length / managerCalls.length) * 100).toFixed(1) : 0,
-          avg_sentiment: completedAnalyses.length > 0 ?
-            (completedAnalyses.reduce((sum, a) => sum + (parseFloat(a.sentiment_score) || 0), 0) / completedAnalyses.length).toFixed(1) : 0,
-          avg_engagement: completedAnalyses.length > 0 ?
-            (completedAnalyses.reduce((sum, a) => sum + (parseFloat(a.engagement_score) || 0), 0) / completedAnalyses.length).toFixed(1) : 0,
-          avg_confidence: completedAnalyses.length > 0 ?
-            (completedAnalyses.reduce((sum, a) => sum + ((parseFloat(a.confidence_score_executive) + parseFloat(a.confidence_score_person)) / 2 || 0), 0) / completedAnalyses.length).toFixed(1) : 0,
-          total_analyses: completedAnalyses.length,
+          avg_call_quality: completedAnalyses.length > 0 ?
+            (completedAnalyses.reduce((sum, a) => sum + (parseFloat(a.call_quality_score) || 0), 0) / completedAnalyses.length).toFixed(1) : 0,
+          avg_closure_probability: completedAnalyses.length > 0 ?
+            (completedAnalyses.reduce((sum, a) => sum + (parseFloat(a.closure_probability) || 0), 0) / completedAnalyses.length).toFixed(1) : 0,
+          avg_script_adherence: completedAnalyses.length > 0 ?
+            (completedAnalyses.reduce((sum, a) => sum + (parseFloat(a.script_adherence) || 0), 0) / completedAnalyses.length).toFixed(1) : 0,
+          avg_compliance_score: completedAnalyses.length > 0 ?
+            (completedAnalyses.reduce((sum, a) => sum + (parseFloat(a.compilience_expections_score) || 0), 0) / completedAnalyses.length).toFixed(1) : 0,
           employees: managerEmployees
         });
       });
@@ -238,21 +288,38 @@ export default function AdminReportsPage() {
         }) || [];
 
         const completedAnalyses = employeeAnalyses.filter(a => a.status?.toLowerCase() === 'completed');
+        
+        // Calculate talk time metrics
+        const validCallsForAvg = employeeCalls.filter(call => (call.exotel_duration || 0) >= 45);
+        const totalTalkTimeSeconds = employeeCalls.reduce((sum, call) => sum + (Number(call.exotel_duration) || 0), 0);
+        const avgTalkTimeSeconds = validCallsForAvg.length > 0 
+          ? validCallsForAvg.reduce((sum, call) => sum + (Number(call.exotel_duration) || 0), 0) / validCallsForAvg.length 
+          : 0;
+        
+        const formatTime = (seconds: number) => {
+          const mins = Math.floor(seconds / 60);
+          const secs = Math.floor(seconds % 60);
+          return `${mins}:${secs.toString().padStart(2, '0')}`;
+        };
 
         employeeStatsMap.set(employee.id, {
           total_calls: employeeCalls.length,
           completed_calls: employeeCalls.filter(c => c.outcome === 'completed' || c.outcome === 'converted').length,
-          follow_up_calls: employeeCalls.filter(c => c.outcome === 'follow_up').length,
-          not_interested: employeeCalls.filter(c => c.outcome === 'not_interested' || c.outcome === 'rejected').length,
-          conversion_rate: employeeCalls.length > 0 ? 
+          total_relevant: employeeCalls.filter(c => (c.exotel_duration || 0) >= 30).length,
+          total_irrelevant: employeeCalls.filter(c => (c.exotel_duration || 0) < 30).length,
+          total_analyzed: completedAnalyses.length,
+          avg_talk_time: formatTime(avgTalkTimeSeconds),
+          total_talk_time: formatTime(totalTalkTimeSeconds),
+          success_rate: employeeCalls.length > 0 ? 
             ((employeeCalls.filter(c => c.outcome === 'completed' || c.outcome === 'converted').length / employeeCalls.length) * 100).toFixed(1) : 0,
-          avg_sentiment: completedAnalyses.length > 0 ?
-            (completedAnalyses.reduce((sum, a) => sum + (parseFloat(a.sentiment_score) || 0), 0) / completedAnalyses.length).toFixed(1) : 0,
-          avg_engagement: completedAnalyses.length > 0 ?
-            (completedAnalyses.reduce((sum, a) => sum + (parseFloat(a.engagement_score) || 0), 0) / completedAnalyses.length).toFixed(1) : 0,
-          avg_confidence: completedAnalyses.length > 0 ?
-            (completedAnalyses.reduce((sum, a) => sum + ((parseFloat(a.confidence_score_executive) + parseFloat(a.confidence_score_person)) / 2 || 0), 0) / completedAnalyses.length).toFixed(1) : 0,
-          total_analyses: completedAnalyses.length
+          avg_call_quality: completedAnalyses.length > 0 ?
+            (completedAnalyses.reduce((sum, a) => sum + (parseFloat(a.call_quality_score) || 0), 0) / completedAnalyses.length).toFixed(1) : 0,
+          avg_closure_probability: completedAnalyses.length > 0 ?
+            (completedAnalyses.reduce((sum, a) => sum + (parseFloat(a.closure_probability) || 0), 0) / completedAnalyses.length).toFixed(1) : 0,
+          avg_script_adherence: completedAnalyses.length > 0 ?
+            (completedAnalyses.reduce((sum, a) => sum + (parseFloat(a.script_adherence) || 0), 0) / completedAnalyses.length).toFixed(1) : 0,
+          avg_compliance_score: completedAnalyses.length > 0 ?
+            (completedAnalyses.reduce((sum, a) => sum + (parseFloat(a.compilience_expections_score) || 0), 0) / completedAnalyses.length).toFixed(1) : 0
         });
       });
 
@@ -278,11 +345,11 @@ export default function AdminReportsPage() {
         total_employees: activeEmployees.length,
         total_calls: totalCalls,
         completed_calls: completedCalls,
-        conversion_rate: totalCalls > 0 ? ((completedCalls / totalCalls) * 100).toFixed(1) : 0,
-        avg_sentiment: allCompletedAnalyses.length > 0 ?
-          (allCompletedAnalyses.reduce((sum, a) => sum + (parseFloat(a.sentiment_score) || 0), 0) / allCompletedAnalyses.length).toFixed(1) : 0,
-        avg_engagement: allCompletedAnalyses.length > 0 ?
-          (allCompletedAnalyses.reduce((sum, a) => sum + (parseFloat(a.engagement_score) || 0), 0) / allCompletedAnalyses.length).toFixed(1) : 0,
+        success_rate: totalCalls > 0 ? ((completedCalls / totalCalls) * 100).toFixed(1) : 0,
+        avg_call_quality: allCompletedAnalyses.length > 0 ?
+          (allCompletedAnalyses.reduce((sum, a) => sum + (parseFloat(a.call_quality_score) || 0), 0) / allCompletedAnalyses.length).toFixed(1) : 0,
+        avg_script_adherence: allCompletedAnalyses.length > 0 ?
+          (allCompletedAnalyses.reduce((sum, a) => sum + (parseFloat(a.script_adherence) || 0), 0) / allCompletedAnalyses.length).toFixed(1) : 0,
         total_analyses: allCompletedAnalyses.length
       };
       
@@ -299,29 +366,33 @@ export default function AdminReportsPage() {
   };
 
   const exportReport = () => {
-    // Simple CSV export
     let csv = `Company Report - ${company?.name}\n`;
-    csv += `Period: ${timePeriod.toUpperCase()}\n`;
-    csv += `Date: ${selectedDate}\n\n`;
+    csv += `Period: ${dateFilter.replace('_', ' ').toUpperCase()}\n`;
+    if (dateFilter === 'custom') {
+      csv += `Date Range: ${customDateRange.startDate} to ${customDateRange.endDate}\n\n`;
+    } else {
+      csv += `Date: ${new Date().toISOString().split('T')[0]}\n\n`;
+    }
     
     csv += `Company Overview\n`;
     csv += `Total Managers,${companyOverview?.total_managers}\n`;
     csv += `Total Employees,${companyOverview?.total_employees}\n`;
     csv += `Total Calls,${companyOverview?.total_calls}\n`;
-    csv += `Conversion Rate,${companyOverview?.conversion_rate}%\n\n`;
+    csv += `Success Rate,${companyOverview?.success_rate}%\n\n`;
 
     csv += `Manager Performance\n`;
-    csv += `Manager Name,Email,Employees,Total Calls,Completed,Conversion Rate,Avg Sentiment\n`;
+    csv += `Manager Name,Email,Employees,Total Calls,Completed,Total Relevant,Total Irrelevant,Total Analyzed,Avg Talk Time,Total Talk Time,Avg Call Quality,Avg Script Adherence\n`;
     managers.forEach(manager => {
       const stats = managerStats.get(manager.id);
-      csv += `${manager.full_name},${manager.email},${stats?.total_employees || 0},${stats?.total_calls || 0},${stats?.completed_calls || 0},${stats?.conversion_rate || 0}%,${stats?.avg_sentiment || 0}%\n`;
+      csv += `${manager.full_name},${manager.email},${stats?.total_employees || 0},${stats?.total_calls || 0},${stats?.completed_calls || 0},${stats?.total_relevant || 0},${stats?.total_irrelevant || 0},${stats?.total_analyzed || 0},${stats?.avg_talk_time || '0:00'},${stats?.total_talk_time || '0:00'},${stats?.avg_call_quality || 0},${stats?.avg_script_adherence || 0}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `admin-report-${timePeriod}-${selectedDate}.csv`;
+    const today = new Date().toISOString().split('T')[0];
+    a.download = `admin-report-${dateFilter}-${today}.csv`;
     a.click();
   };
 
@@ -350,30 +421,48 @@ export default function AdminReportsPage() {
       {/* Filters */}
       <Card>
         <CardContent className="pt-6">
-          <div className="flex items-center gap-4">
-            <div className="flex-1">
-              <label className="text-sm font-medium mb-2 block">Time Period</label>
-              <Select value={timePeriod} onValueChange={(value: any) => setTimePeriod(value)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="daily">Daily</SelectItem>
-                  <SelectItem value="weekly">Weekly (Last 7 days)</SelectItem>
-                  <SelectItem value="monthly">Monthly (Last 30 days)</SelectItem>
-                </SelectContent>
-              </Select>
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-4">
+              <div className="flex-1">
+                <label className="text-sm font-medium mb-2 block">Time Period</label>
+                <Select value={dateFilter} onValueChange={(value: any) => setDateFilter(value)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="yesterday">Yesterday</SelectItem>
+                    <SelectItem value="this_week">This Week</SelectItem>
+                    <SelectItem value="this_month">This Month</SelectItem>
+                    <SelectItem value="custom">Custom Range</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div className="flex-1">
-              <label className="text-sm font-medium mb-2 block">End Date</label>
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                max={new Date().toISOString().split('T')[0]}
-              />
-            </div>
+            {dateFilter === 'custom' && (
+              <div className="flex items-center gap-4">
+                <div className="flex-1">
+                  <label className="text-sm font-medium mb-2 block">Start Date</label>
+                  <input
+                    type="date"
+                    value={customDateRange.startDate}
+                    onChange={(e) => setCustomDateRange(prev => ({ ...prev, startDate: e.target.value }))}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    max={new Date().toISOString().split('T')[0]}
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="text-sm font-medium mb-2 block">End Date</label>
+                  <input
+                    type="date"
+                    value={customDateRange.endDate}
+                    onChange={(e) => setCustomDateRange(prev => ({ ...prev, endDate: e.target.value }))}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    max={new Date().toISOString().split('T')[0]}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -415,11 +504,12 @@ export default function AdminReportsPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Conversion Rate</CardTitle>
+            <CardTitle className="text-sm font-medium">Success Rate</CardTitle>
             <Target className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{companyOverview?.conversion_rate || 0}%</div>
+            <div className="text-2xl font-bold">{companyOverview?.success_rate || 0}%</div>
+            <p className="text-xs text-muted-foreground">Connected calls</p>
           </CardContent>
         </Card>
       </div>
@@ -428,21 +518,27 @@ export default function AdminReportsPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium">Avg Sentiment Score</CardTitle>
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Award className="h-4 w-4" />
+              Avg Call Quality Score
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-blue-600">{companyOverview?.avg_sentiment || 0}%</div>
-            <p className="text-xs text-muted-foreground mt-1">Across all calls</p>
+            <div className="text-3xl font-bold text-blue-600">{companyOverview?.avg_call_quality || 0}</div>
+            <p className="text-xs text-muted-foreground mt-1">Average across all analyzed calls</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium">Avg Engagement Score</CardTitle>
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <MessageSquare className="h-4 w-4" />
+              Avg Script Adherence
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-green-600">{companyOverview?.avg_engagement || 0}%</div>
-            <p className="text-xs text-muted-foreground mt-1">Across all calls</p>
+            <div className="text-3xl font-bold text-green-600">{companyOverview?.avg_script_adherence || 0}</div>
+            <p className="text-xs text-muted-foreground mt-1">Average across all analyzed calls</p>
           </CardContent>
         </Card>
 
@@ -467,90 +563,184 @@ export default function AdminReportsPage() {
           <CardDescription>Detailed performance metrics for each manager and their team</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-6">
+          <div className="space-y-4">
             {managers.filter(m => m.is_active === true).map(manager => {
               const stats = managerStats.get(manager.id);
               const managerEmployees = employees.filter(emp => emp.manager_id === manager.id && emp.is_active === true);
+              const isExpanded = expandedManagers.has(manager.id);
+              const performanceScore = parseFloat(stats?.success_rate || '0');
 
               return (
-                <div key={manager.id} className="border rounded-lg p-4">
-                  {/* Manager Header */}
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h3 className="text-lg font-semibold">{manager.full_name}</h3>
-                      <p className="text-sm text-muted-foreground">{manager.email}</p>
+                <Card key={manager.id}>
+                  <CardContent className="pt-6">
+                    {/* Manager Header */}
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                          <User className="h-5 w-5 text-blue-600" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold">{manager.full_name}</h3>
+                          <p className="text-sm text-muted-foreground">{manager.email}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={performanceScore >= 50 ? "default" : "secondary"}>
+                          {performanceScore >= 70 ? 'High Performer' : performanceScore >= 40 ? 'Good' : 'Needs Improvement'}
+                        </Badge>
+                      </div>
                     </div>
-                    <Badge variant="outline">{stats?.total_employees || 0} Employees</Badge>
-                  </div>
 
-                  {/* Manager Stats Grid */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                    <div className="bg-blue-50 p-3 rounded-lg">
-                      <div className="text-2xl font-bold text-blue-600">{stats?.total_calls || 0}</div>
-                      <p className="text-xs text-blue-600 font-medium">Total Calls</p>
+                    {/* Manager Stats Grid */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                      <div className="bg-blue-50 p-3 rounded-lg">
+                        <div className="text-xl font-bold text-blue-600">{stats?.total_calls || 0}</div>
+                        <p className="text-xs text-blue-600 font-medium">Total Calls</p>
+                      </div>
+                      <div className="bg-green-50 p-3 rounded-lg">
+                        <div className="text-xl font-bold text-green-600">{stats?.completed_calls || 0}</div>
+                        <p className="text-xs text-green-600 font-medium">Completed</p>
+                      </div>
+                      <div className="bg-teal-50 p-3 rounded-lg">
+                        <div className="text-xl font-bold text-teal-600">{stats?.total_relevant || 0}</div>
+                        <p className="text-xs text-teal-600 font-medium">Total Relevant</p>
+                      </div>
+                      <div className="bg-orange-50 p-3 rounded-lg">
+                        <div className="text-xl font-bold text-orange-600">{stats?.total_irrelevant || 0}</div>
+                        <p className="text-xs text-orange-600 font-medium">Total Irrelevant</p>
+                      </div>
+                      <div className="bg-indigo-50 p-3 rounded-lg">
+                        <div className="text-xl font-bold text-indigo-600">{stats?.total_analyzed || 0}</div>
+                        <p className="text-xs text-indigo-600 font-medium">Total Analyzed</p>
+                      </div>
+                      <div className="bg-cyan-50 p-3 rounded-lg">
+                        <div className="text-xl font-bold text-cyan-600">{stats?.avg_talk_time || '0:00'}</div>
+                        <p className="text-xs text-cyan-600 font-medium">Avg Talk Time</p>
+                      </div>
+                      <div className="bg-purple-50 p-3 rounded-lg">
+                        <div className="text-xl font-bold text-purple-600">{stats?.total_talk_time || '0:00'}</div>
+                        <p className="text-xs text-purple-600 font-medium">Total Talk Time</p>
+                      </div>
                     </div>
-                    <div className="bg-green-50 p-3 rounded-lg">
-                      <div className="text-2xl font-bold text-green-600">{stats?.completed_calls || 0}</div>
-                      <p className="text-xs text-green-600 font-medium">Completed</p>
-                    </div>
-                    <div className="bg-purple-50 p-3 rounded-lg">
-                      <div className="text-2xl font-bold text-purple-600">{stats?.conversion_rate || 0}%</div>
-                      <p className="text-xs text-purple-600 font-medium">Conversion Rate</p>
-                    </div>
-                    <div className="bg-orange-50 p-3 rounded-lg">
-                      <div className="text-2xl font-bold text-orange-600">{stats?.avg_sentiment || 0}%</div>
-                      <p className="text-xs text-orange-600 font-medium">Avg Sentiment</p>
-                    </div>
-                  </div>
 
-                  {/* Employee List for this Manager */}
-                  <div className="mt-4">
-                    <h4 className="text-sm font-semibold mb-3">Team Members Performance</h4>
-                    <div className="space-y-2">
-                      {managerEmployees.map(employee => {
-                        const empStats = employeeStats.get(employee.id);
-                        return (
-                          <div key={employee.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                                <User className="h-4 w-4 text-blue-600" />
-                              </div>
-                              <div>
-                                <p className="font-medium text-sm">{employee.full_name}</p>
-                                <p className="text-xs text-muted-foreground">{employee.email}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-4 text-sm">
-                              <div className="text-center">
-                                <div className="font-semibold">{empStats?.total_calls || 0}</div>
-                                <div className="text-xs text-muted-foreground">Calls</div>
-                              </div>
-                              <div className="text-center">
-                                <div className="font-semibold text-green-600">{empStats?.completed_calls || 0}</div>
-                                <div className="text-xs text-muted-foreground">Completed</div>
-                              </div>
-                              <div className="text-center">
-                                <div className="font-semibold text-purple-600">{empStats?.conversion_rate || 0}%</div>
-                                <div className="text-xs text-muted-foreground">Conv. Rate</div>
-                              </div>
-                              <div className="text-center">
-                                <div className="font-semibold text-blue-600">{empStats?.avg_sentiment || 0}%</div>
-                                <div className="text-xs text-muted-foreground">Sentiment</div>
-                              </div>
-                              <div className="text-center">
-                                <div className="font-semibold text-orange-600">{empStats?.avg_engagement || 0}%</div>
-                                <div className="text-xs text-muted-foreground">Engagement</div>
-                              </div>
-                            </div>
+                    {/* Call Quality Metrics */}
+                    <div className="mt-4 pt-4 border-t">
+                      <h4 className="text-sm font-semibold mb-3">Call Quality Metrics</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="text-center p-2 bg-gray-50 rounded">
+                          <div className="text-lg font-bold">{stats?.avg_call_quality || 0}</div>
+                          <p className="text-xs text-muted-foreground">Avg Call Quality</p>
+                        </div>
+                        <div className="text-center p-2 bg-gray-50 rounded">
+                          <div className="text-lg font-bold">{stats?.avg_closure_probability || 0}</div>
+                          <p className="text-xs text-muted-foreground">Avg Closure Probability</p>
+                        </div>
+                        <div className="text-center p-2 bg-gray-50 rounded">
+                          <div className="text-lg font-bold">{stats?.avg_script_adherence || 0}</div>
+                          <p className="text-xs text-muted-foreground">Avg Script Adherence</p>
+                        </div>
+                        <div className="text-center p-2 bg-gray-50 rounded">
+                          <div className="text-lg font-bold">{stats?.avg_compliance_score || 0}</div>
+                          <p className="text-xs text-muted-foreground">Avg Compliance Score</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Toggle Button for Employees */}
+                    {managerEmployees.length > 0 && (
+                      <div className="mt-4 pt-4 border-t">
+                        <Button
+                          variant="ghost"
+                          className="w-full flex items-center justify-between"
+                          onClick={() => toggleManagerExpanded(manager.id)}
+                        >
+                          <span className="font-medium">
+                            Team Members ({managerEmployees.length} employees)
+                          </span>
+                          {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        </Button>
+
+                        {/* Collapsible Employee List */}
+                        {isExpanded && (
+                          <div className="mt-4 space-y-3">
+                            {managerEmployees.map(employee => {
+                              const empStats = employeeStats.get(employee.id);
+                              return (
+                                <div key={employee.id} className="border rounded-lg p-4 bg-white">
+                                  <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                                        <User className="h-4 w-4 text-blue-600" />
+                                      </div>
+                                      <div>
+                                        <p className="font-medium text-sm">{employee.full_name}</p>
+                                        <p className="text-xs text-muted-foreground">{employee.email}</p>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Employee Stats Grid */}
+                                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
+                                    <div className="text-center p-2 bg-blue-50 rounded">
+                                      <div className="font-bold text-blue-600">{empStats?.total_calls || 0}</div>
+                                      <div className="text-xs text-blue-600">Total Calls</div>
+                                    </div>
+                                    <div className="text-center p-2 bg-green-50 rounded">
+                                      <div className="font-bold text-green-600">{empStats?.completed_calls || 0}</div>
+                                      <div className="text-xs text-green-600">Completed</div>
+                                    </div>
+                                    <div className="text-center p-2 bg-teal-50 rounded">
+                                      <div className="font-bold text-teal-600">{empStats?.total_relevant || 0}</div>
+                                      <div className="text-xs text-teal-600">Relevant</div>
+                                    </div>
+                                    <div className="text-center p-2 bg-orange-50 rounded">
+                                      <div className="font-bold text-orange-600">{empStats?.total_irrelevant || 0}</div>
+                                      <div className="text-xs text-orange-600">Irrelevant</div>
+                                    </div>
+                                    <div className="text-center p-2 bg-indigo-50 rounded">
+                                      <div className="font-bold text-indigo-600">{empStats?.total_analyzed || 0}</div>
+                                      <div className="text-xs text-indigo-600">Analyzed</div>
+                                    </div>
+                                    <div className="text-center p-2 bg-cyan-50 rounded">
+                                      <div className="font-bold text-cyan-600">{empStats?.avg_talk_time || '0:00'}</div>
+                                      <div className="text-xs text-cyan-600">Avg Time</div>
+                                    </div>
+                                    <div className="text-center p-2 bg-purple-50 rounded">
+                                      <div className="font-bold text-purple-600">{empStats?.total_talk_time || '0:00'}</div>
+                                      <div className="text-xs text-purple-600">Total Time</div>
+                                    </div>
+                                  </div>
+
+                                  {/* Employee Call Quality Metrics */}
+                                  <div className="mt-3 pt-3 border-t">
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                      <div className="text-center p-2 bg-gray-50 rounded">
+                                        <div className="text-sm font-bold">{empStats?.avg_call_quality || 0}</div>
+                                        <div className="text-xs text-muted-foreground">Call Quality</div>
+                                      </div>
+                                      <div className="text-center p-2 bg-gray-50 rounded">
+                                        <div className="text-sm font-bold">{empStats?.avg_closure_probability || 0}</div>
+                                        <div className="text-xs text-muted-foreground">Closure Prob.</div>
+                                      </div>
+                                      <div className="text-center p-2 bg-gray-50 rounded">
+                                        <div className="text-sm font-bold">{empStats?.avg_script_adherence || 0}</div>
+                                        <div className="text-xs text-muted-foreground">Script Adh.</div>
+                                      </div>
+                                      <div className="text-center p-2 bg-gray-50 rounded">
+                                        <div className="text-sm font-bold">{empStats?.avg_compliance_score || 0}</div>
+                                        <div className="text-xs text-muted-foreground">Compliance</div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
-                        );
-                      })}
-                      {managerEmployees.length === 0 && (
-                        <p className="text-sm text-muted-foreground text-center py-4">No employees under this manager</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               );
             })}
             {managers.filter(m => m.is_active === true).length === 0 && (

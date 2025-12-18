@@ -2511,6 +2511,14 @@ export default function AdminDashboard() {
       <header className="border-b bg-white px-6 py-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
+            <img 
+              src="/Sattva_logo.png" 
+              alt="Sattva" 
+              className="h-10 w-auto cursor-pointer hover:opacity-80 transition-opacity"
+              onError={(e) => {
+                e.currentTarget.src = "/Sattva_logo.png";
+              }}
+            />
             <h1 className="text-xl font-bold text-foreground">Admin Dashboard</h1>
             <Badge className="bg-blue-500 text-white">
               <Shield className="h-3 w-3 mr-1" />
