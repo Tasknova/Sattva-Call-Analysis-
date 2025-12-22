@@ -132,6 +132,7 @@ export interface Client {
   address?: string
   website?: string
   is_active: boolean
+  assigned_to_manager?: string
   created_at: string
   updated_at: string
 }

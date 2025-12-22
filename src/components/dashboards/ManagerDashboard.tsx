@@ -466,24 +466,23 @@ export default function ManagerDashboard() {
       // Set manager data
       setManager(managerData);
 
-      // Fetch clients assigned to this manager
-      const { data: clientAssignmentsData, error: clientAssignmentsError } = await supabase
-        .from('manager_client_assignments')
-        .select('client_id, clients(*)')
-        .eq('manager_id', managerData.id)
+      // Fetch clients assigned to this manager directly
+      const { data: directClientsData, error: directClientsError } = await supabase
+        .from('clients')
+        .select('*')
+        .eq('assigned_to_manager', managerData.id)
         .eq('is_active', true);
 
-      if (clientAssignmentsError) {
-        console.error('Client assignments error:', clientAssignmentsError);
+      if (directClientsError) {
+        console.error('Direct clients error:', directClientsError);
         setAssignedClients([]);
       } else {
-        const clients = clientAssignmentsData?.map(assignment => assignment.clients).filter(Boolean) || [];
-        setAssignedClients(clients);
+        setAssignedClients(directClientsData || []);
       }
 
       // Fetch jobs for assigned clients
-      if (clientAssignmentsData && clientAssignmentsData.length > 0) {
-        const clientIds = clientAssignmentsData.map(assignment => assignment.client_id);
+      if (directClientsData && directClientsData.length > 0) {
+        const clientIds = directClientsData.map(client => client.id);
         const { data: jobsData, error: jobsError } = await supabase
           .from('jobs')
           .select('*, clients(*)')
@@ -1520,26 +1519,22 @@ export default function ManagerDashboard() {
               <Phone className="h-4 w-4" />
               Leads
             </Button>
-            {company?.industry?.toLowerCase() === 'hr' && (
-              <>
-                <Button 
-                  variant={selectedTab === "clients" ? "accent" : "ghost"} 
-                  className="w-full justify-start"
-                  onClick={() => setSelectedTab("clients")}
-                >
-                  <Building className="h-4 w-4" />
-                  Clients
-                </Button>
-                <Button 
-                  variant={selectedTab === "jobs" ? "accent" : "ghost"} 
-                  className="w-full justify-start"
-                  onClick={() => setSelectedTab("jobs")}
-                >
-                  <Briefcase className="h-4 w-4" />
-                  Jobs
-                </Button>
-              </>
-            )}
+            <Button 
+              variant={selectedTab === "clients" ? "accent" : "ghost"} 
+              className="w-full justify-start"
+              onClick={() => setSelectedTab("clients")}
+            >
+              <Building className="h-4 w-4" />
+              Clients
+            </Button>
+            <Button 
+              variant={selectedTab === "jobs" ? "accent" : "ghost"} 
+              className="w-full justify-start"
+              onClick={() => setSelectedTab("jobs")}
+            >
+              <Briefcase className="h-4 w-4" />
+              Jobs
+            </Button>
             <Button 
               variant={selectedTab === "call-history" ? "accent" : "ghost"} 
               className="w-full justify-start"
@@ -3429,21 +3424,17 @@ export default function ManagerDashboard() {
               return null;
             })()}
 
-            {company?.industry?.toLowerCase() === 'hr' && (
-              <>
-                <TabsContent value="clients" className="space-y-6">
-                  <ClientsPage managerId={manager?.id} />
-                </TabsContent>
+            <TabsContent value="clients" className="space-y-6">
+              <ClientsPage managerId={manager?.id} />
+            </TabsContent>
 
-                <TabsContent value="jobs" className="space-y-6">
-                  <JobsPage managerId={manager?.id} />
-                </TabsContent>
+            <TabsContent value="jobs" className="space-y-6">
+              <JobsPage managerId={manager?.id} />
+            </TabsContent>
 
-                <TabsContent value="productivity" className="space-y-6">
-                  <EmployeeProductivityPage managerId={manager?.id} />
-                </TabsContent>
-              </>
-            )}
+            <TabsContent value="productivity" className="space-y-6">
+              <EmployeeProductivityPage managerId={manager?.id} />
+            </TabsContent>
 
             <TabsContent value="profile" className="space-y-6">
               <ManagerProfilePage onBack={() => setSelectedTab("overview")} />

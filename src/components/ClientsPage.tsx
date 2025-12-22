@@ -46,9 +46,10 @@ import { Client } from "@/lib/supabase";
 
 interface ClientsPageProps {
   managerId?: string;
+  readOnly?: boolean;
 }
 
-export default function ClientsPage({ managerId }: ClientsPageProps = {}) {
+export default function ClientsPage({ managerId, readOnly = false }: ClientsPageProps = {}) {
   const { company } = useAuth();
   const [searchTerm, setSearchTerm] = useState("");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -56,21 +57,16 @@ export default function ClientsPage({ managerId }: ClientsPageProps = {}) {
   const [deletingClient, setDeletingClient] = useState<Client | null>(null);
   
   const { data: allClients, isLoading, error } = useClients();
-  const { data: assignments, isLoading: assignmentsLoading } = useManagerClientAssignments(managerId);
   
   console.log('ClientsPage - managerId:', managerId);
   console.log('ClientsPage - allClients:', allClients);
-  console.log('ClientsPage - assignments:', assignments);
-  console.log('ClientsPage - assignmentsLoading:', assignmentsLoading);
   console.log('ClientsPage - isLoading:', isLoading);
   console.log('ClientsPage - error:', error);
   
-  // Filter clients based on managerId if provided
+  // Filter clients based on managerId if provided - use assigned_to_manager column
   const clients = managerId 
     ? allClients?.filter(client => {
-        return assignments?.some(assignment => {
-          return assignment.client_id === client.id;
-        });
+        return client.assigned_to_manager === managerId;
       })
     : allClients;
   

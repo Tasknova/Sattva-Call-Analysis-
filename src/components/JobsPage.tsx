@@ -51,9 +51,10 @@ import { Job } from "@/lib/supabase";
 
 interface JobsPageProps {
   managerId?: string;
+  readOnly?: boolean;
 }
 
-export default function JobsPage({ managerId }: JobsPageProps = {}) {
+export default function JobsPage({ managerId, readOnly = false }: JobsPageProps = {}) {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -62,29 +63,25 @@ export default function JobsPage({ managerId }: JobsPageProps = {}) {
   
   const { data: allJobs, isLoading, error } = useJobs();
   const { data: allClients } = useClients();
-  const { data: assignments } = useManagerClientAssignments(managerId);
   
   console.log('JobsPage - managerId:', managerId);
   console.log('JobsPage - allJobs:', allJobs);
   console.log('JobsPage - allClients:', allClients);
-  console.log('JobsPage - assignments:', assignments);
   
-  // Filter clients and jobs based on managerId if provided
-  const assignedClientIds = managerId 
-    ? assignments?.map(assignment => assignment.client_id) || []
-    : [];
+  // Filter clients and jobs based on managerId if provided using assigned_to_manager
+  const clients = managerId 
+    ? allClients?.filter(client => client.assigned_to_manager === managerId)
+    : allClients;
+  
+  const assignedClientIds = clients?.map(client => client.id) || [];
   
   console.log('JobsPage - assignedClientIds:', assignedClientIds);
-  
-  const clients = managerId 
-    ? allClients?.filter(client => assignedClientIds.includes(client.id))
-    : allClients;
+  console.log('JobsPage - filtered clients:', clients);
     
   const jobs = managerId 
     ? allJobs?.filter(job => assignedClientIds.includes(job.client_id))
     : allJobs;
   
-  console.log('JobsPage - filtered clients:', clients);
   console.log('JobsPage - filtered jobs:', jobs);
   const createJob = useCreateJob();
   const updateJob = useUpdateJob();

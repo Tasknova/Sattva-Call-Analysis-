@@ -2582,29 +2582,22 @@ export default function AdminDashboard() {
               <Phone className="h-4 w-4" />
               Leads
             </Button>
-
-            {/* HR-specific navigation */}
-            {company?.industry?.toLowerCase() === 'hr' && (
-              <>
-                <Button
-                  variant={activeSidebarItem === 'clients' ? 'accent' : 'ghost'}
-                  className="w-full justify-start"
-                  onClick={() => setActiveSidebarItem('clients')}
-                >
-                  <Building className="h-4 w-4" />
-                  Clients
-                </Button>
-                <Button
-                  variant={activeSidebarItem === 'jobs' ? 'accent' : 'ghost'}
-                  className="w-full justify-start"
-                  onClick={() => setActiveSidebarItem('jobs')}
-                >
-                  <Briefcase className="h-4 w-4" />
-                  Jobs
-                </Button>
-              </>
-            )}
-
+            <Button
+              variant={activeSidebarItem === 'clients' ? 'accent' : 'ghost'}
+              className="w-full justify-start"
+              onClick={() => setActiveSidebarItem('clients')}
+            >
+              <Building className="h-4 w-4" />
+              Clients
+            </Button>
+            <Button
+              variant={activeSidebarItem === 'jobs' ? 'accent' : 'ghost'}
+              className="w-full justify-start"
+              onClick={() => setActiveSidebarItem('jobs')}
+            >
+              <Briefcase className="h-4 w-4" />
+              Jobs
+            </Button>
             <Button
               variant={activeSidebarItem === 'call-history' ? 'accent' : 'ghost'}
               className="w-full justify-start"
