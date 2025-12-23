@@ -89,40 +89,52 @@ export default function AdminReportsPage() {
 
   const getDateRange = () => {
     const now = new Date();
-    let startDate: Date;
-    let endDate = new Date();
-    endDate.setHours(23, 59, 59, 999);
+    let startDateStr: string;
+    let endDateStr: string;
+
+    const formatDateToISO = (date: Date, isEndOfDay: boolean = false) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      
+      if (isEndOfDay) {
+        return `${year}-${month}-${day}T23:59:59.999Z`;
+      } else {
+        return `${year}-${month}-${day}T00:00:00.000Z`;
+      }
+    };
 
     if (dateFilter === 'today') {
-      startDate = new Date();
-      startDate.setHours(0, 0, 0, 0);
+      startDateStr = formatDateToISO(now, false);
+      endDateStr = formatDateToISO(now, true);
     } else if (dateFilter === 'yesterday') {
-      startDate = new Date();
-      startDate.setDate(now.getDate() - 1);
-      startDate.setHours(0, 0, 0, 0);
-      endDate = new Date();
-      endDate.setDate(now.getDate() - 1);
-      endDate.setHours(23, 59, 59, 999);
+      const yesterday = new Date();
+      yesterday.setDate(now.getDate() - 1);
+      startDateStr = formatDateToISO(yesterday, false);
+      endDateStr = formatDateToISO(yesterday, true);
     } else if (dateFilter === 'this_week') {
-      startDate = new Date();
-      startDate.setDate(now.getDate() - 7);
-      startDate.setHours(0, 0, 0, 0);
+      const weekAgo = new Date();
+      weekAgo.setDate(now.getDate() - 7);
+      startDateStr = formatDateToISO(weekAgo, false);
+      endDateStr = formatDateToISO(now, true);
     } else if (dateFilter === 'this_month') {
-      startDate = new Date();
-      startDate.setDate(now.getDate() - 30);
-      startDate.setHours(0, 0, 0, 0);
+      const monthAgo = new Date();
+      monthAgo.setDate(now.getDate() - 30);
+      startDateStr = formatDateToISO(monthAgo, false);
+      endDateStr = formatDateToISO(now, true);
     } else if (dateFilter === 'custom' && customDateRange.startDate && customDateRange.endDate) {
-      startDate = new Date(customDateRange.startDate);
-      startDate.setHours(0, 0, 0, 0);
-      endDate = new Date(customDateRange.endDate);
-      endDate.setHours(23, 59, 59, 999);
+      const startDate = new Date(customDateRange.startDate);
+      const endDate = new Date(customDateRange.endDate);
+      startDateStr = formatDateToISO(startDate, false);
+      endDateStr = formatDateToISO(endDate, true);
     } else {
-      startDate = new Date();
-      startDate.setDate(now.getDate() - 30);
-      startDate.setHours(0, 0, 0, 0);
+      const monthAgo = new Date();
+      monthAgo.setDate(now.getDate() - 30);
+      startDateStr = formatDateToISO(monthAgo, false);
+      endDateStr = formatDateToISO(now, true);
     }
 
-    return { startDate: startDate.toISOString(), endDate: endDate.toISOString() };
+    return { startDate: startDateStr, endDate: endDateStr };
   };
 
   const fetchReportData = async () => {
@@ -175,14 +187,26 @@ export default function AdminReportsPage() {
       setManagers(managersData || []);
       setEmployees(employeesData || []);
 
-      // Fetch calls for the period
+      // Fetch calls for the period using call_date
       // Note: employee_id in call_history is actually the user_id from employees table
+      console.log('=== CALL HISTORY QUERY DEBUG ===');
+      console.log('Date Filter:', dateFilter);
+      console.log('Start Date:', startDate);
+      console.log('End Date:', endDate);
+      console.log('Company ID:', userRole.company_id);
+      
       const { data: callsData, error: callsError } = await supabase
         .from('call_history')
         .select('*')
         .eq('company_id', userRole.company_id)
-        .gte('created_at', startDate)
-        .lte('created_at', endDate);
+        .gte('call_date', startDate)
+        .lte('call_date', endDate);
+      
+      console.log('Calls returned:', callsData?.length || 0);
+      if (callsData && callsData.length > 0) {
+        console.log('Sample call:', callsData[0]);
+      }
+      console.log('Query error:', callsError);
 
       if (callsError) {
         console.error('Error fetching calls:', callsError);

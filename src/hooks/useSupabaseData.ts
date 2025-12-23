@@ -342,34 +342,53 @@ export function useLeads(groupId?: string) {
     queryFn: async () => {
       if (!user) throw new Error('User not authenticated')
       
-      let query = supabase
-        .from('leads')
-        .select(`
-          *,
-          lead_groups (
-            id,
-            group_name
-          ),
-          clients (
-            id,
-            name
-          ),
-          jobs (
-            id,
-            title,
-            client_id
-          )
-        `)
-        .order('created_at', { ascending: false })
+      // Fetch all leads using pagination (Supabase has 1000 row limit per request)
+      let allLeads: any[] = [];
+      let from = 0;
+      const batchSize = 1000;
+      let hasMore = true;
       
-      if (groupId) {
-        query = query.eq('group_id', groupId)
+      while (hasMore) {
+        let query = supabase
+          .from('leads')
+          .select(`
+            *,
+            lead_groups (
+              id,
+              group_name
+            ),
+            clients (
+              id,
+              name
+            ),
+            jobs (
+              id,
+              title,
+              client_id
+            )
+          `)
+          .order('created_at', { ascending: false })
+          .range(from, from + batchSize - 1);
+        
+        if (groupId) {
+          query = query.eq('group_id', groupId);
+        }
+        
+        const { data, error } = await query;
+        
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+          allLeads = [...allLeads, ...data];
+          from += batchSize;
+          hasMore = data.length === batchSize;
+        } else {
+          hasMore = false;
+        }
       }
       
-      const { data, error } = await query
-      
-      if (error) throw error
-      return data as Lead[]
+      console.log('useLeads - Fetched total leads:', allLeads.length);
+      return allLeads as Lead[];
     },
     enabled: !!user
   })

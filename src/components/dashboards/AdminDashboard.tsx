@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
+import { formatNumber } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 import { useSessionTimeout } from "@/hooks/useSessionTimeout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -217,12 +218,26 @@ export default function AdminDashboard() {
   const [phoneAssignments, setPhoneAssignments] = useState<any[]>([]);
 
   // Date filter state
-  const [dateFilter, setDateFilter] = useState<'today' | 'week' | 'month' | 'custom'>('month');
+  const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('month');
   const [customDateRange, setCustomDateRange] = useState({
     startDate: '',
     endDate: ''
   });
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
+  
+  // Pagination state
+  const [callHistoryPage, setCallHistoryPage] = useState(1);
+  const [leadsPage, setLeadsPage] = useState(1);
+  const ITEMS_PER_PAGE = 50;
+  
+  // Team Performance states
+  const [selectedManagerForTeamPerf, setSelectedManagerForTeamPerf] = useState<string>('');
+  const [teamPerfDateFilter, setTeamPerfDateFilter] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('today');
+  const [teamPerfCustomStartDate, setTeamPerfCustomStartDate] = useState<string>('');
+  const [teamPerfCustomEndDate, setTeamPerfCustomEndDate] = useState<string>('');
+  const [teamPerfEmployeeFilter, setTeamPerfEmployeeFilter] = useState<string>('all');
+  const [teamPerfSortBy, setTeamPerfSortBy] = useState<'name' | 'totalCalls' | 'relevantCalls' | 'irrelevantCalls' | 'contacted' | 'notAnswered' | 'failed' | 'busy' | 'duration' | 'avgTime'>('name');
+  const [teamPerfSortOrder, setTeamPerfSortOrder] = useState<'asc' | 'desc'>('asc');
 
   const [newUser, setNewUser] = useState({
     email: "",
@@ -505,11 +520,36 @@ export default function AdminDashboard() {
       setManagers(managersWithEmployees);
       setEmployees(employeesWithProfiles);
 
-      // Fetch all leads for this company
-      const { data: leadsData, error: leadsError } = await supabase
-        .from('leads')
-        .select('*')
-        .eq('company_id', userRole.company_id);
+      // Fetch all leads for this company using pagination (Supabase has 1000 row limit per request)
+      let allLeadsData: any[] = [];
+      let leadsFrom = 0;
+      const leadsBatchSize = 1000;
+      let leadsHasMore = true;
+      let leadsError = null;
+      
+      while (leadsHasMore) {
+        const { data, error } = await supabase
+          .from('leads')
+          .select('*')
+          .eq('company_id', userRole.company_id)
+          .range(leadsFrom, leadsFrom + leadsBatchSize - 1);
+        
+        if (error) {
+          leadsError = error;
+          break;
+        }
+        
+        if (data && data.length > 0) {
+          allLeadsData = [...allLeadsData, ...data];
+          leadsFrom += leadsBatchSize;
+          leadsHasMore = data.length === leadsBatchSize;
+        } else {
+          leadsHasMore = false;
+        }
+      }
+      
+      const leadsData = allLeadsData;
+      console.log('AdminDashboard - Fetched total leads:', leadsData.length);
 
       if (leadsError) {
         console.error('Error fetching leads:', leadsError);
@@ -572,18 +612,40 @@ export default function AdminDashboard() {
         console.log('Fetched lead groups:', leadGroupsData);
       }
 
-      // Fetch all calls for this company
-      const { data: callsData, error: callsError } = await supabase
-        .from('call_history')
-        .select('*, leads(name, email, contact), employees(full_name, email)')
-        .eq('company_id', userRole.company_id)
-        .order('created_at', { ascending: false });
+      // Fetch all calls for this company using pagination (Supabase has 1000 row limit per request)
+      let allCalls: any[] = [];
+      let callsError = null;
+      let from = 0;
+      const batchSize = 1000;
+      let hasMore = true;
+      
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('call_history')
+          .select('*, leads(name, email, contact), employees(full_name, email)')
+          .eq('company_id', userRole.company_id)
+          .order('created_at', { ascending: false })
+          .range(from, from + batchSize - 1);
+        
+        if (error) {
+          callsError = error;
+          break;
+        }
+        
+        if (data && data.length > 0) {
+          allCalls = [...allCalls, ...data];
+          from += batchSize;
+          hasMore = data.length === batchSize;
+        } else {
+          hasMore = false;
+        }
+      }
 
       if (callsError) {
         console.error('Error fetching calls:', callsError);
       } else {
-        setCalls(callsData || []);
-        console.log('Fetched calls:', callsData);
+        setCalls(allCalls);
+        console.log('AdminDashboard - Fetched calls count:', allCalls.length);
       }
 
       // Fetch employee daily productivity data
@@ -2255,46 +2317,60 @@ export default function AdminDashboard() {
   // Filter data based on date range - using useMemo for reactivity
   const dateFilteredCalls = useMemo(() => {
     const now = new Date();
-    const currentTime = now.getTime();
+    
+    // Get local date string in YYYY-MM-DD format
+    const getLocalDateStr = (date: Date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    // Helper function to extract YYYY-MM-DD from any date string format
+    const extractDateStr = (dateString: string): string => {
+      if (!dateString) return '';
+      // Handle: "2025-12-22T15:03:30" OR "2025-12-22 15:03:30+00"
+      return dateString.substring(0, 10); // Just take first 10 chars: YYYY-MM-DD
+    };
+    
+    const todayStr = getLocalDateStr(now);
+    
+    console.log('AdminDashboard dateFilteredCalls - Total calls in state:', calls.length);
+    console.log('AdminDashboard dateFilteredCalls - dateFilter:', dateFilter);
 
     const filtered = calls.filter(call => {
-      if (!call.created_at) return false;
-      const date = new Date(call.created_at);
-      const callTime = date.getTime();
+      const dateToUse = call.call_date || call.created_at;
+      if (!dateToUse) return false;
+      
+      // Extract date portion only (YYYY-MM-DD) to avoid timezone issues
+      const callDateStr = extractDateStr(dateToUse);
 
       if (dateFilter === 'today') {
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-        return callTime >= todayStart.getTime() && callTime <= todayEnd.getTime();
+        return callDateStr === todayStr;
+      } else if (dateFilter === 'yesterday') {
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = getLocalDateStr(yesterday);
+        return callDateStr === yesterdayStr;
       } else if (dateFilter === 'week') {
-        // Get Monday of current week as start
-        const weekStart = new Date(now);
-        const dayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // If Sunday, go back 6 days to Monday
-        weekStart.setDate(now.getDate() - daysFromMonday);
-        weekStart.setHours(0, 0, 0, 0);
-
-        // Get Friday of current week as end
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 4); // Friday is 4 days after Monday
-        weekEnd.setHours(23, 59, 59, 999);
-
-        return callTime >= weekStart.getTime() && callTime <= weekEnd.getTime();
+        // Last 7 days including today
+        const weekAgo = new Date(now);
+        weekAgo.setDate(weekAgo.getDate() - 6);
+        const weekAgoStr = getLocalDateStr(weekAgo);
+        return callDateStr >= weekAgoStr && callDateStr <= todayStr;
       } else if (dateFilter === 'month') {
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        monthStart.setHours(0, 0, 0, 0);
-        // Don't include future dates beyond current time
-        return callTime >= monthStart.getTime() && callTime <= currentTime;
+        // Last 30 days including today
+        const monthAgo = new Date(now);
+        monthAgo.setDate(monthAgo.getDate() - 29);
+        const monthAgoStr = getLocalDateStr(monthAgo);
+        return callDateStr >= monthAgoStr && callDateStr <= todayStr;
       } else if (dateFilter === 'custom' && customDateRange.startDate && customDateRange.endDate) {
-        const start = new Date(customDateRange.startDate);
-        start.setHours(0, 0, 0, 0);
-        const end = new Date(customDateRange.endDate);
-        end.setHours(23, 59, 59, 999);
-        return callTime >= start.getTime() && callTime <= end.getTime();
+        return callDateStr >= customDateRange.startDate && callDateStr <= customDateRange.endDate;
       }
       return true; // Default: show all data
     });
 
+    console.log('AdminDashboard dateFilteredCalls - Filtered count:', filtered.length);
     return filtered;
   }, [calls, dateFilter, customDateRange.startDate, customDateRange.endDate]);
 
@@ -2372,44 +2448,53 @@ export default function AdminDashboard() {
 
   const dateFilteredAnalyses = useMemo(() => {
     const now = new Date();
-    const currentTime = now.getTime();
+    
+    // Get local date string in YYYY-MM-DD format
+    const getLocalDateStr = (date: Date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    // Helper function to extract YYYY-MM-DD from any date string format
+    const extractDateStr = (dateString: string): string => {
+      if (!dateString) return '';
+      return dateString.substring(0, 10); // Just take first 10 chars: YYYY-MM-DD
+    };
+
+    const todayStr = getLocalDateStr(now);
 
     return analyses.filter(analysis => {
-      const createdAt = analysis.created_at || analysis.recordings?.call_history?.created_at;
+      const createdAt = analysis.recordings?.call_history?.call_date 
+        || analysis.recordings?.call_history?.created_at 
+        || analysis.created_at;
       if (!createdAt) return false;
 
-      const date = new Date(createdAt);
-      const analysisTime = date.getTime();
+      // Extract date portion only (YYYY-MM-DD) to avoid timezone issues
+      const analysisDateStr = extractDateStr(createdAt);
 
       if (dateFilter === 'today') {
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-        return analysisTime >= todayStart.getTime() && analysisTime <= todayEnd.getTime();
+        return analysisDateStr === todayStr;
+      } else if (dateFilter === 'yesterday') {
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = getLocalDateStr(yesterday);
+        return analysisDateStr === yesterdayStr;
       } else if (dateFilter === 'week') {
-        // Get Monday of current week as start
-        const weekStart = new Date(now);
-        const dayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // If Sunday, go back 6 days to Monday
-        weekStart.setDate(now.getDate() - daysFromMonday);
-        weekStart.setHours(0, 0, 0, 0);
-
-        // Get Friday of current week as end
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 4); // Friday is 4 days after Monday
-        weekEnd.setHours(23, 59, 59, 999);
-
-        return analysisTime >= weekStart.getTime() && analysisTime <= weekEnd.getTime();
+        // Last 7 days including today
+        const weekAgo = new Date(now);
+        weekAgo.setDate(weekAgo.getDate() - 6);
+        const weekAgoStr = getLocalDateStr(weekAgo);
+        return analysisDateStr >= weekAgoStr && analysisDateStr <= todayStr;
       } else if (dateFilter === 'month') {
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        monthStart.setHours(0, 0, 0, 0);
-        // Don't include future dates beyond current time
-        return analysisTime >= monthStart.getTime() && analysisTime <= currentTime;
+        // Last 30 days including today
+        const monthAgo = new Date(now);
+        monthAgo.setDate(monthAgo.getDate() - 29);
+        const monthAgoStr = getLocalDateStr(monthAgo);
+        return analysisDateStr >= monthAgoStr && analysisDateStr <= todayStr;
       } else if (dateFilter === 'custom' && customDateRange.startDate && customDateRange.endDate) {
-        const start = new Date(customDateRange.startDate);
-        start.setHours(0, 0, 0, 0);
-        const end = new Date(customDateRange.endDate);
-        end.setHours(23, 59, 59, 999);
-        return analysisTime >= start.getTime() && analysisTime <= end.getTime();
+        return analysisDateStr >= customDateRange.startDate && analysisDateStr <= customDateRange.endDate;
       }
       return true;
     });
@@ -2428,6 +2513,11 @@ export default function AdminDashboard() {
         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
         return prodTime >= todayStart.getTime() && prodTime <= todayEnd.getTime();
+      } else if (dateFilter === 'yesterday') {
+        const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+        const yesterdayStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
+        const yesterdayEnd = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59, 999);
+        return prodTime >= yesterdayStart.getTime() && prodTime <= yesterdayEnd.getTime();
       } else if (dateFilter === 'week') {
         // Get Monday of current week as start
         const weekStart = new Date(now);
@@ -2615,6 +2705,14 @@ export default function AdminDashboard() {
               Analysis
             </Button>
             <Button
+              variant={activeSidebarItem === 'team-performance' ? 'accent' : 'ghost'}
+              className="w-full justify-start"
+              onClick={() => setActiveSidebarItem('team-performance')}
+            >
+              <TrendingUp className="h-4 w-4" />
+              Team Performance
+            </Button>
+            <Button
               variant={activeSidebarItem === 'reports' ? 'accent' : 'ghost'}
               className="w-full justify-start"
               onClick={() => setActiveSidebarItem('reports')}
@@ -2658,7 +2756,6 @@ export default function AdminDashboard() {
                         variant={dateFilter === 'today' ? 'default' : 'outline'}
                         size="sm"
                         onClick={() => {
-                          console.log('Setting date filter to: today');
                           setDateFilter('today');
                           setShowCustomDatePicker(false);
                         }}
@@ -2666,15 +2763,24 @@ export default function AdminDashboard() {
                         Today
                       </Button>
                       <Button
+                        variant={dateFilter === 'yesterday' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => {
+                          setDateFilter('yesterday');
+                          setShowCustomDatePicker(false);
+                        }}
+                      >
+                        Yesterday
+                      </Button>
+                      <Button
                         variant={dateFilter === 'week' ? 'default' : 'outline'}
                         size="sm"
                         onClick={() => {
-                          console.log('Setting date filter to: week');
                           setDateFilter('week');
                           setShowCustomDatePicker(false);
                         }}
                       >
-                        This Week
+                        Last 7 Days
                       </Button>
                       <Button
                         variant={dateFilter === 'month' ? 'default' : 'outline'}
@@ -2758,7 +2864,7 @@ export default function AdminDashboard() {
                     <Users className="h-5 w-5 text-blue-500" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-3xl font-bold">{managers.length}</div>
+                    <div className="text-3xl font-bold">{formatNumber(managers.length)}</div>
                   </CardContent>
                 </Card>
 
@@ -2768,7 +2874,7 @@ export default function AdminDashboard() {
                     <UserPlus className="h-5 w-5 text-red-500" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-3xl font-bold">{employees.length}</div>
+                    <div className="text-3xl font-bold">{formatNumber(employees.length)}</div>
                   </CardContent>
                 </Card>
 
@@ -2778,7 +2884,7 @@ export default function AdminDashboard() {
                     <Phone className="h-5 w-5 text-pink-500" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-3xl font-bold">{leads.length}</div>
+                    <div className="text-3xl font-bold">{formatNumber(leads.length)}</div>
                   </CardContent>
                 </Card>
 
@@ -2788,7 +2894,7 @@ export default function AdminDashboard() {
                     <PhoneCall className="h-5 w-5 text-violet-500" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-3xl font-bold">{dateFilteredCalls.length < 1000 ? dateFilteredCalls.length : `${(dateFilteredCalls.length / 1000).toFixed(1)}k`}</div>
+                    <div className="text-3xl font-bold">{formatNumber(dateFilteredCalls.length)}</div>
                     <div className="flex items-center mt-1">
                       <TrendingUp className="h-3 w-3 text-green-500 mr-1" />
                       <span className="text-xs font-medium text-green-500">Good</span>
@@ -2843,7 +2949,7 @@ export default function AdminDashboard() {
                     <Building className="h-5 w-5 text-orange-600" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold text-orange-700">{clients?.length || 0}</div>
+                    <div className="text-2xl font-bold text-orange-700">{formatNumber(clients?.length || 0)}</div>
                     <p className="text-xs text-gray-600 mt-1">Organizations served</p>
                   </CardContent>
                 </Card>
@@ -2854,7 +2960,7 @@ export default function AdminDashboard() {
                     <Briefcase className="h-5 w-5 text-cyan-600" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold text-cyan-700">{jobs?.length || 0}</div>
+                    <div className="text-2xl font-bold text-cyan-700">{formatNumber(jobs?.length || 0)}</div>
                     <p className="text-xs text-gray-600 mt-1">Job postings</p>
                   </CardContent>
                 </Card>
@@ -2865,7 +2971,7 @@ export default function AdminDashboard() {
                     <Users className="h-5 w-5 text-yellow-600" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold text-yellow-700">{leadGroups.length}</div>
+                    <div className="text-2xl font-bold text-yellow-700">{formatNumber(leadGroups.length)}</div>
                     <p className="text-xs text-gray-600 mt-1">Organized groups</p>
                   </CardContent>
                 </Card>
@@ -2927,7 +3033,7 @@ export default function AdminDashboard() {
                                 { name: 'Completed (Irrelevant)', value: dateFilteredCalls.filter(c => c.outcome === 'completed' && (c.exotel_duration || 0) < 30).length, fill: '#86efac' },
                                 { name: 'Busy', value: dateFilteredCalls.filter(c => c.outcome === 'busy').length, fill: '#f59e0b' },
                                 { name: 'No Answer', value: dateFilteredCalls.filter(c => c.outcome === 'no-answer').length, fill: '#6366f1' },
-                                { name: 'Failed', value: dateFilteredCalls.filter(c => c.outcome === 'failed').length, fill: '#ef4444' },
+                                { name: 'Failed', value: dateFilteredCalls.filter(c => c.outcome === 'Failed').length, fill: '#ef4444' },
                               ].filter(d => d.value > 0)}
                               cx="35%"
                               cy="50%"
@@ -2942,7 +3048,7 @@ export default function AdminDashboard() {
                                 { name: 'Completed (Irrelevant)', value: dateFilteredCalls.filter(c => c.outcome === 'completed' && (c.exotel_duration || 0) < 30).length, fill: '#86efac' },
                                 { name: 'Busy', value: dateFilteredCalls.filter(c => c.outcome === 'busy').length, fill: '#f59e0b' },
                                 { name: 'No Answer', value: dateFilteredCalls.filter(c => c.outcome === 'no-answer').length, fill: '#6366f1' },
-                                { name: 'Failed', value: dateFilteredCalls.filter(c => c.outcome === 'failed').length, fill: '#ef4444' },
+                                { name: 'Failed', value: dateFilteredCalls.filter(c => c.outcome === 'Failed').length, fill: '#ef4444' },
                               ].filter(d => d.value > 0).map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill={entry.fill} />
                               ))}
@@ -2952,36 +3058,49 @@ export default function AdminDashboard() {
                         </ResponsiveContainer>
                       </ChartContainer>
                       <div className="mt-3 space-y-1 text-xs">
-                        {dateFilteredCalls.filter(c => c.outcome === 'completed' && (c.exotel_duration || 0) >= 30).length > 0 && (
-                          <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                            <span className="text-gray-600">Completed - Relevant ≥30s ({dateFilteredCalls.filter(c => c.outcome === 'completed' && (c.exotel_duration || 0) >= 30).length})</span>
-                          </div>
-                        )}
-                        {dateFilteredCalls.filter(c => c.outcome === 'completed' && (c.exotel_duration || 0) < 30).length > 0 && (
-                          <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 rounded-full bg-green-300"></div>
-                            <span className="text-gray-600">Completed - Irrelevant &lt;30s ({dateFilteredCalls.filter(c => c.outcome === 'completed' && (c.exotel_duration || 0) < 30).length})</span>
-                          </div>
-                        )}
-                        {dateFilteredCalls.filter(c => c.outcome === 'busy').length > 0 && (
-                          <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 rounded-full bg-amber-500"></div>
-                            <span className="text-gray-600">Busy ({dateFilteredCalls.filter(c => c.outcome === 'busy').length})</span>
-                          </div>
-                        )}
-                        {dateFilteredCalls.filter(c => c.outcome === 'no-answer').length > 0 && (
-                          <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 rounded-full bg-indigo-500"></div>
-                            <span className="text-gray-600">No Answer ({dateFilteredCalls.filter(c => c.outcome === 'no-answer').length})</span>
-                          </div>
-                        )}
-                        {dateFilteredCalls.filter(c => c.outcome === 'failed').length > 0 && (
-                          <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                            <span className="text-gray-600">Failed ({dateFilteredCalls.filter(c => c.outcome === 'failed').length})</span>
-                          </div>
-                        )}
+                        {(() => {
+                          const totalCalls = dateFilteredCalls.length || 1;
+                          const relevantCount = dateFilteredCalls.filter(c => c.outcome === 'completed' && (c.exotel_duration || 0) >= 30).length;
+                          const irrelevantCount = dateFilteredCalls.filter(c => c.outcome === 'completed' && (c.exotel_duration || 0) < 30).length;
+                          const busyCount = dateFilteredCalls.filter(c => c.outcome === 'busy').length;
+                          const noAnswerCount = dateFilteredCalls.filter(c => c.outcome === 'no-answer').length;
+                          const failedCount = dateFilteredCalls.filter(c => c.outcome === 'Failed').length;
+                          
+                          return (
+                            <>
+                              {relevantCount > 0 && (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                                  <span className="text-gray-600">Completed - Relevant ≥30s ({relevantCount} - {Math.round((relevantCount / totalCalls) * 100)}%)</span>
+                                </div>
+                              )}
+                              {irrelevantCount > 0 && (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-3 h-3 rounded-full bg-green-300"></div>
+                                  <span className="text-gray-600">Completed - Irrelevant &lt;30s ({irrelevantCount} - {Math.round((irrelevantCount / totalCalls) * 100)}%)</span>
+                                </div>
+                              )}
+                              {busyCount > 0 && (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+                                  <span className="text-gray-600">Busy ({busyCount} - {Math.round((busyCount / totalCalls) * 100)}%)</span>
+                                </div>
+                              )}
+                              {noAnswerCount > 0 && (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-3 h-3 rounded-full bg-indigo-500"></div>
+                                  <span className="text-gray-600">No Answer ({noAnswerCount} - {Math.round((noAnswerCount / totalCalls) * 100)}%)</span>
+                                </div>
+                              )}
+                              {failedCount > 0 && (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                                  <span className="text-gray-600">Failed ({failedCount} - {Math.round((failedCount / totalCalls) * 100)}%)</span>
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     </CardContent>
                   </Card>
@@ -2992,58 +3111,57 @@ export default function AdminDashboard() {
                       <CardTitle className="text-sm font-semibold">Closure Distribution</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="space-y-3">
-                        <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs text-gray-600">High (70%+)</span>
-                            <span className="text-xs font-bold text-green-600">
-                              {dateFilteredAnalyses.filter(a => (a.closure_probability || 0) >= 70).length}
-                            </span>
-                          </div>
-                          <div className="w-full bg-gray-100 rounded-full h-2">
-                            <div
-                              className="bg-green-500 h-2 rounded-full transition-all"
-                              style={{
-                                width: `${dateFilteredAnalyses.length > 0 ? (dateFilteredAnalyses.filter(a => (a.closure_probability || 0) >= 70).length / dateFilteredAnalyses.length) * 100 : 0}%`
-                              }}
-                            ></div>
-                          </div>
-                        </div>
+                      {(() => {
+                        // Only count analyses that have an actual closure_probability value (not null/undefined)
+                        const analysesWithClosure = dateFilteredAnalyses.filter(a => a.closure_probability != null && a.closure_probability !== undefined);
+                        const highCount = analysesWithClosure.filter(a => a.closure_probability >= 70).length;
+                        const mediumCount = analysesWithClosure.filter(a => a.closure_probability >= 40 && a.closure_probability < 70).length;
+                        const lowCount = analysesWithClosure.filter(a => a.closure_probability < 40).length;
+                        const total = analysesWithClosure.length;
+                        
+                        return (
+                          <div className="space-y-3">
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs text-gray-600">High (70%+)</span>
+                                <span className="text-xs font-bold text-green-600">{highCount}</span>
+                              </div>
+                              <div className="w-full bg-gray-100 rounded-full h-2">
+                                <div
+                                  className="bg-green-500 h-2 rounded-full transition-all"
+                                  style={{ width: `${total > 0 ? (highCount / total) * 100 : 0}%` }}
+                                ></div>
+                              </div>
+                            </div>
 
-                        <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs text-gray-600">Medium (40-69%)</span>
-                            <span className="text-xs font-bold text-amber-600">
-                              {dateFilteredAnalyses.filter(a => (a.closure_probability || 0) >= 40 && (a.closure_probability || 0) < 70).length}
-                            </span>
-                          </div>
-                          <div className="w-full bg-gray-100 rounded-full h-2">
-                            <div
-                              className="bg-amber-500 h-2 rounded-full transition-all"
-                              style={{
-                                width: `${dateFilteredAnalyses.length > 0 ? (dateFilteredAnalyses.filter(a => (a.closure_probability || 0) >= 40 && (a.closure_probability || 0) < 70).length / dateFilteredAnalyses.length) * 100 : 0}%`
-                              }}
-                            ></div>
-                          </div>
-                        </div>
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs text-gray-600">Medium (40-69%)</span>
+                                <span className="text-xs font-bold text-amber-600">{mediumCount}</span>
+                              </div>
+                              <div className="w-full bg-gray-100 rounded-full h-2">
+                                <div
+                                  className="bg-amber-500 h-2 rounded-full transition-all"
+                                  style={{ width: `${total > 0 ? (mediumCount / total) * 100 : 0}%` }}
+                                ></div>
+                              </div>
+                            </div>
 
-                        <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs text-gray-600">Low (&lt;40%)</span>
-                            <span className="text-xs font-bold text-red-600">
-                              {dateFilteredAnalyses.filter(a => (a.closure_probability || 0) < 40).length}
-                            </span>
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs text-gray-600">Low (&lt;40%)</span>
+                                <span className="text-xs font-bold text-red-600">{lowCount}</span>
+                              </div>
+                              <div className="w-full bg-gray-100 rounded-full h-2">
+                                <div
+                                  className="bg-red-500 h-2 rounded-full transition-all"
+                                  style={{ width: `${total > 0 ? (lowCount / total) * 100 : 0}%` }}
+                                ></div>
+                              </div>
+                            </div>
                           </div>
-                          <div className="w-full bg-gray-100 rounded-full h-2">
-                            <div
-                              className="bg-red-500 h-2 rounded-full transition-all"
-                              style={{
-                                width: `${dateFilteredAnalyses.length > 0 ? (dateFilteredAnalyses.filter(a => (a.closure_probability || 0) < 40).length / dateFilteredAnalyses.length) * 100 : 0}%`
-                              }}
-                            ></div>
-                          </div>
-                        </div>
-                      </div>
+                        );
+                      })()}
                     </CardContent>
                   </Card>
                 </div>
@@ -3187,32 +3305,63 @@ export default function AdminDashboard() {
                       }} className="h-[280px]">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={(() => {
-                            const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-                            const dayData = dayNames.map((day, index) => {
-                              // Get profiles downloaded from employee_daily_productivity table
-                              const dayProfiles = dateFilteredDailyProductivity.filter(p => {
-                                const productivityDate = new Date(p.date);
-                                return productivityDate.getDay() === index;
-                              });
-
-                              const totalProfiles = dayProfiles.reduce((sum, p) => sum + (p.profiles_downloaded || 0), 0);
-
-                              return {
-                                day: day.substring(0, 3),
-                                calls: dateFilteredCalls.filter(c => {
-                                  const callDate = new Date(c.created_at);
-                                  return callDate.getDay() === index;
-                                }).length,
-                                profiles: totalProfiles
-                              };
+                            // Always show last 7 days regardless of filter
+                            const today = new Date();
+                            today.setHours(23, 59, 59, 999);
+                            const sevenDaysAgo = new Date(today);
+                            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+                            sevenDaysAgo.setHours(0, 0, 0, 0);
+                            
+                            // Initialize all 7 days with 0 values
+                            const dateMap = new Map<string, { calls: number; profiles: number; dateObj: Date }>();
+                            for (let i = 0; i < 7; i++) {
+                              const date = new Date(sevenDaysAgo);
+                              date.setDate(date.getDate() + i);
+                              const dateKey = date.toISOString().split('T')[0];
+                              dateMap.set(dateKey, { calls: 0, profiles: 0, dateObj: new Date(date) });
+                            }
+                            
+                            // Process ALL calls (not filtered) within last 7 days
+                            (calls || []).forEach(c => {
+                              const callDate = new Date(c.call_date || c.created_at);
+                              if (callDate >= sevenDaysAgo && callDate <= today) {
+                                const dateKey = callDate.toISOString().split('T')[0];
+                                if (dateMap.has(dateKey)) {
+                                  dateMap.get(dateKey)!.calls++;
+                                }
+                              }
                             });
-                            return dayData;
+                            
+                            // Process ALL profile downloads within last 7 days
+                            (dailyProductivity || []).forEach(p => {
+                              const prodDate = new Date(p.date);
+                              if (prodDate >= sevenDaysAgo && prodDate <= today) {
+                                const dateKey = prodDate.toISOString().split('T')[0];
+                                if (dateMap.has(dateKey)) {
+                                  dateMap.get(dateKey)!.profiles += (p.profiles_downloaded || 0);
+                                }
+                              }
+                            });
+                            
+                            // Convert to array sorted by date
+                            const sortedData = Array.from(dateMap.entries())
+                              .sort((a, b) => a[0].localeCompare(b[0]))
+                              .map(([dateKey, data]) => ({
+                                day: data.dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                                calls: data.calls,
+                                profiles: data.profiles
+                              }));
+                            
+                            return sortedData;
                           })()} barGap={4}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                             <XAxis
                               dataKey="day"
-                              tick={{ fontSize: 12 }}
+                              tick={{ fontSize: 10 }}
                               axisLine={{ stroke: '#d1d5db' }}
+                              angle={-45}
+                              textAnchor="end"
+                              height={60}
                             />
                             <YAxis
                               tick={{ fontSize: 12 }}
@@ -3429,7 +3578,7 @@ export default function AdminDashboard() {
                         <Phone className="h-4 w-4 text-muted-foreground" />
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold">{leads.length}</div>
+                        <div className="text-2xl font-bold">{formatNumber(leads.length)}</div>
                         <p className="text-xs text-muted-foreground">
                           All time leads
                         </p>
@@ -3442,7 +3591,7 @@ export default function AdminDashboard() {
                         <TrendingUp className="h-4 w-4 text-muted-foreground" />
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold">{leads.filter(lead => lead.status === 'active' || lead.status === 'assigned').length}</div>
+                        <div className="text-2xl font-bold">{formatNumber(leads.filter(lead => lead.status === 'active' || lead.status === 'assigned').length)}</div>
                         <p className="text-xs text-muted-foreground">
                           Currently active
                         </p>
@@ -3455,7 +3604,7 @@ export default function AdminDashboard() {
                         <Users className="h-4 w-4 text-muted-foreground" />
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold">{leads.filter(lead => lead.status === 'converted').length}</div>
+                        <div className="text-2xl font-bold">{formatNumber(leads.filter(lead => lead.status === 'converted').length)}</div>
                         <p className="text-xs text-muted-foreground">
                           Successfully converted
                         </p>
@@ -3644,8 +3793,8 @@ export default function AdminDashboard() {
                               )}
                             </div>
                           )}
-                          {leads
-                            .filter(lead => {
+                          {(() => {
+                            const filteredLeads = leads.filter(lead => {
                               const matchesSearch =
                                 (lead.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                                 (lead.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -3659,8 +3808,18 @@ export default function AdminDashboard() {
                               const matchesManager = selectedManagerFilterLeads === 'all' ||
                                 lead.user_id === managers.find(m => m.id === selectedManagerFilterLeads)?.user_id;
                               return matchesSearch && matchesClient && matchesJob && matchesEmployee && matchesManager;
-                            })
-                            .map((lead) => (
+                            });
+                            
+                            // Pagination
+                            const totalPages = Math.ceil(filteredLeads.length / ITEMS_PER_PAGE);
+                            const paginatedLeads = filteredLeads.slice(
+                              (leadsPage - 1) * ITEMS_PER_PAGE,
+                              leadsPage * ITEMS_PER_PAGE
+                            );
+                            
+                            return (
+                              <>
+                                {paginatedLeads.map((lead) => (
                               <div key={lead.id} className={`flex items-center justify-between p-4 border rounded-lg transition-colors ${selectedLeadIds.has(lead.id) ? 'bg-blue-50 border-blue-300' : ''}`}>
                                 <div className="flex items-center space-x-4">
                                   <input
@@ -3726,6 +3885,55 @@ export default function AdminDashboard() {
                                 </div>
                               </div>
                             ))}
+                            
+                            {/* Leads Pagination */}
+                            {totalPages > 1 && (
+                              <div className="flex items-center justify-between px-4 py-3 bg-white border rounded-lg mt-4">
+                                <div className="text-sm text-gray-600">
+                                  Showing {((leadsPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(leadsPage * ITEMS_PER_PAGE, filteredLeads.length)} of {formatNumber(filteredLeads.length)} leads
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setLeadsPage(1)}
+                                    disabled={leadsPage === 1}
+                                  >
+                                    First
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setLeadsPage(p => Math.max(1, p - 1))}
+                                    disabled={leadsPage === 1}
+                                  >
+                                    Previous
+                                  </Button>
+                                  <span className="px-3 py-1 text-sm">
+                                    Page {leadsPage} of {totalPages}
+                                  </span>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setLeadsPage(p => Math.min(totalPages, p + 1))}
+                                    disabled={leadsPage === totalPages}
+                                  >
+                                    Next
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setLeadsPage(totalPages)}
+                                    disabled={leadsPage === totalPages}
+                                  >
+                                    Last
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                           {leads.filter(lead =>
                             (lead.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                             (lead.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -4317,7 +4525,14 @@ export default function AdminDashboard() {
                         );
                       }
 
-                      return filteredCalls.map((call) => {
+                      // Pagination
+                      const totalPages = Math.ceil(filteredCalls.length / ITEMS_PER_PAGE);
+                      const paginatedCalls = filteredCalls.slice(
+                        (callHistoryPage - 1) * ITEMS_PER_PAGE,
+                        callHistoryPage * ITEMS_PER_PAGE
+                      );
+
+                      return paginatedCalls.map((call) => {
                         const disposition = call.outcome || 'unknown';
 
                         const getDispositionStyle = (outcome: string) => {
@@ -4397,6 +4612,92 @@ export default function AdminDashboard() {
                   </TableBody>
                 </Table>
               </div>
+              
+              {/* Call History Pagination */}
+              {(() => {
+                // Calculate total for pagination display (simplified version)
+                let filteredCalls = calls;
+                if (callOutcomeFilter !== 'all') {
+                  if (callOutcomeFilter === 'followup') {
+                    const followUpCallIds = new Set(analyses.filter(a => a.follow_up_details && a.follow_up_details.trim().length > 0 && !a.follow_up_details.toLowerCase().includes('irrelevant according to transcript') && a.recordings?.call_history_id).map(a => a.recordings?.call_history_id).filter(Boolean));
+                    filteredCalls = filteredCalls.filter(call => followUpCallIds.has(call.id));
+                  } else {
+                    filteredCalls = filteredCalls.filter(call => call.outcome === callOutcomeFilter);
+                  }
+                }
+                if (selectedManagerFilter && selectedManagerFilter !== 'all') {
+                  const managerUserId = managers.find(m => m.id === selectedManagerFilter)?.user_id;
+                  filteredCalls = filteredCalls.filter(call => {
+                    const callManagerId = call.employees?.manager_id;
+                    if (!callManagerId) {
+                      const emp = employees.find(e => e.user_id === call.employee_id || e.id === call.employee_id);
+                      if (!emp) return false;
+                      return emp.manager_id === selectedManagerFilter || (managerUserId && emp.manager_id === managerUserId);
+                    }
+                    return callManagerId === selectedManagerFilter || (managerUserId && callManagerId === managerUserId);
+                  });
+                }
+                if (selectedEmployeeFilter && selectedEmployeeFilter !== 'all') {
+                  filteredCalls = filteredCalls.filter(call => call.employee_id === selectedEmployeeFilter);
+                }
+                if (callSearch && callSearch.trim() !== '') {
+                  const q = callSearch.trim().toLowerCase();
+                  filteredCalls = filteredCalls.filter(call => {
+                    const leadName = (call.leads?.name || '').toLowerCase();
+                    const contact = (call.leads?.contact || '').toLowerCase();
+                    return leadName.includes(q) || contact.includes(q);
+                  });
+                }
+                const totalItems = filteredCalls.length;
+                const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
+                
+                if (totalPages <= 1) return null;
+                
+                return (
+                  <div className="flex items-center justify-between px-4 py-3 bg-white border rounded-lg mt-4">
+                    <div className="text-sm text-gray-600">
+                      Showing {((callHistoryPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(callHistoryPage * ITEMS_PER_PAGE, totalItems)} of {formatNumber(totalItems)} calls
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCallHistoryPage(1)}
+                        disabled={callHistoryPage === 1}
+                      >
+                        First
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCallHistoryPage(p => Math.max(1, p - 1))}
+                        disabled={callHistoryPage === 1}
+                      >
+                        Previous
+                      </Button>
+                      <span className="px-3 py-1 text-sm">
+                        Page {callHistoryPage} of {totalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCallHistoryPage(p => Math.min(totalPages, p + 1))}
+                        disabled={callHistoryPage === totalPages}
+                      >
+                        Next
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCallHistoryPage(totalPages)}
+                        disabled={callHistoryPage === totalPages}
+                      >
+                        Last
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Call Details Dialog */}
               <Dialog open={isCallDetailsModalOpen} onOpenChange={setIsCallDetailsModalOpen}>
@@ -4667,6 +4968,404 @@ export default function AdminDashboard() {
                   )}
                 </CardContent>
               </Card>
+            </div>
+          )}
+
+          {activeSidebarItem === 'team-performance' && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold mb-2">Team Performance</h2>
+                  <p className="text-muted-foreground">Select a manager to view their team's detailed performance metrics</p>
+                </div>
+              </div>
+
+              {/* Manager Selection Card */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Select Manager</CardTitle>
+                  <CardDescription>Choose a manager to view their team's performance data</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Select value={selectedManagerForTeamPerf} onValueChange={setSelectedManagerForTeamPerf}>
+                    <SelectTrigger className="w-full max-w-md">
+                      <SelectValue placeholder="Choose a manager..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {managers.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.profile?.full_name || m.full_name || m.email}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </CardContent>
+              </Card>
+
+              {selectedManagerForTeamPerf ? (
+                <>
+                  {/* Filters Card */}
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="space-y-4">
+                        {/* Time Period Filter */}
+                        <div className="flex flex-wrap items-center gap-4">
+                          <Label className="font-semibold min-w-[100px]">Time Period:</Label>
+                          <div className="flex flex-wrap gap-2">
+                            <Button 
+                              variant={teamPerfDateFilter === 'today' ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => setTeamPerfDateFilter('today')}
+                            >
+                              Today
+                            </Button>
+                            <Button 
+                              variant={teamPerfDateFilter === 'yesterday' ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => setTeamPerfDateFilter('yesterday')}
+                            >
+                              Yesterday
+                            </Button>
+                            <Button 
+                              variant={teamPerfDateFilter === 'week' ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => setTeamPerfDateFilter('week')}
+                            >
+                              Last 7 Days
+                            </Button>
+                            <Button 
+                              variant={teamPerfDateFilter === 'month' ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => setTeamPerfDateFilter('month')}
+                            >
+                              This Month
+                            </Button>
+                            <Button 
+                              variant={teamPerfDateFilter === 'custom' ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => setTeamPerfDateFilter('custom')}
+                            >
+                              Custom Range
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Custom Date Range */}
+                        {teamPerfDateFilter === 'custom' && (
+                          <div className="flex flex-wrap items-center gap-4">
+                            <Label className="font-semibold min-w-[100px]">Date Range:</Label>
+                            <div className="flex items-center gap-2">
+                              <Input 
+                                type="date" 
+                                value={teamPerfCustomStartDate}
+                                onChange={(e) => setTeamPerfCustomStartDate(e.target.value)}
+                                className="w-40"
+                              />
+                              <span>to</span>
+                              <Input 
+                                type="date" 
+                                value={teamPerfCustomEndDate}
+                                onChange={(e) => setTeamPerfCustomEndDate(e.target.value)}
+                                className="w-40"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Employee Filter */}
+                        <div className="flex flex-wrap items-center gap-4">
+                          <Label className="font-semibold min-w-[100px]">Employee:</Label>
+                          <Select value={teamPerfEmployeeFilter} onValueChange={setTeamPerfEmployeeFilter}>
+                            <SelectTrigger className="w-[250px]">
+                              <SelectValue placeholder="Select employee" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Employees</SelectItem>
+                              {employees.filter(emp => emp.manager_id === selectedManagerForTeamPerf).map((emp) => (
+                                <SelectItem key={emp.id} value={emp.user_id}>
+                                  {emp.profile?.full_name || emp.full_name || emp.email}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {/* Sort Options */}
+                        <div className="flex flex-wrap items-center gap-4">
+                          <Label className="font-semibold min-w-[100px]">Sort By:</Label>
+                          <div className="flex gap-2">
+                            <Select value={teamPerfSortBy} onValueChange={(value: any) => setTeamPerfSortBy(value)}>
+                              <SelectTrigger className="w-[200px]">
+                                <SelectValue placeholder="Select sort field" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="name">Name</SelectItem>
+                                <SelectItem value="totalCalls">Total Calls</SelectItem>
+                                <SelectItem value="relevantCalls">Relevant Calls</SelectItem>
+                                <SelectItem value="irrelevantCalls">Irrelevant Calls</SelectItem>
+                                <SelectItem value="contacted">Contacted</SelectItem>
+                                <SelectItem value="notAnswered">Not Answered</SelectItem>
+                                <SelectItem value="failed">Failed</SelectItem>
+                                <SelectItem value="busy">Busy</SelectItem>
+                                <SelectItem value="duration">Total Duration</SelectItem>
+                                <SelectItem value="avgTime">Avg. Talk Time</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Select value={teamPerfSortOrder} onValueChange={(value: any) => setTeamPerfSortOrder(value)}>
+                              <SelectTrigger className="w-[150px]">
+                                <SelectValue placeholder="Order" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="asc">Ascending</SelectItem>
+                                <SelectItem value="desc">Descending</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Performance Table */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Performance Overview</CardTitle>
+                      <CardDescription>Call metrics and statistics for the selected manager's team</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="overflow-x-auto rounded-lg shadow border bg-white">
+                        <table className="w-full">
+                          <thead className="sticky top-0 z-10 bg-gray-100">
+                            <tr className="border-b">
+                              <th className="text-left py-3 px-2 font-semibold whitespace-nowrap">Team Member</th>
+                              <th className="text-right py-3 px-2 font-semibold whitespace-nowrap">Total Calls</th>
+                              <th className="text-right py-3 px-2 font-semibold whitespace-nowrap">Relevant <span className='ml-1 text-xs bg-green-100 text-green-700 rounded px-1'>≥30s</span></th>
+                              <th className="text-right py-3 px-2 font-semibold whitespace-nowrap">Irrelevant <span className='ml-1 text-xs bg-gray-200 text-gray-700 rounded px-1'>&lt;30s</span></th>
+                              <th className="text-right py-3 px-2 font-semibold whitespace-nowrap"><span className='bg-green-100 text-green-700 rounded px-2 py-1 text-xs'>Contacted</span></th>
+                              <th className="text-right py-3 px-2 font-semibold whitespace-nowrap"><span className='bg-blue-100 text-blue-700 rounded px-2 py-1 text-xs'>Not Answered</span></th>
+                              <th className="text-right py-3 px-2 font-semibold whitespace-nowrap"><span className='bg-red-100 text-red-700 rounded px-2 py-1 text-xs'>Failed</span></th>
+                              <th className="text-right py-3 px-2 font-semibold whitespace-nowrap"><span className='bg-orange-100 text-orange-700 rounded px-2 py-1 text-xs'>Busy</span></th>
+                              <th className="text-right py-3 px-2 font-semibold whitespace-nowrap">Total Duration</th>
+                              <th className="text-right py-3 px-2 font-semibold whitespace-nowrap">Avg. Talk Time</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(() => {
+                              // Helper function for team performance date filtering - matches ManagerDashboard logic exactly
+                              const isTeamPerfDateInRange = (dateString: string) => {
+                                const date = new Date(dateString);
+                                const now = new Date();
+                                
+                                const dateUTC = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+                                const nowUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+                                
+                                switch (teamPerfDateFilter) {
+                                  case 'today':
+                                    return dateUTC === nowUTC;
+                                  
+                                  case 'yesterday':
+                                    const yesterdayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1);
+                                    return dateUTC === yesterdayUTC;
+                                  
+                                  case 'week':
+                                    const weekAgoUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6);
+                                    return dateUTC >= weekAgoUTC && dateUTC <= nowUTC;
+                                  
+                                  case 'month':
+                                    const monthAgoUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 29);
+                                    return dateUTC >= monthAgoUTC && dateUTC <= nowUTC;
+                                  
+                                  case 'custom':
+                                    if (!teamPerfCustomStartDate || !teamPerfCustomEndDate) return true;
+                                    const start = new Date(teamPerfCustomStartDate);
+                                    const end = new Date(teamPerfCustomEndDate);
+                                    const startUTC = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+                                    const endUTC = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
+                                    return dateUTC >= startUTC && dateUTC <= endUTC;
+                                  
+                                  default:
+                                    return true;
+                                }
+                              };
+
+                              // Filter calls for team performance page
+                              const teamPerfFilteredCalls = calls.filter(call => {
+                                const dateMatch = isTeamPerfDateInRange(call.call_date || call.created_at);
+                                
+                                // Check if call belongs to any employee of the selected manager
+                                const employeeMatch = employees.some(emp => 
+                                  emp.manager_id === selectedManagerForTeamPerf && 
+                                  emp.user_id === call.employee_id
+                                );
+                                
+                                return dateMatch && employeeMatch;
+                              });
+
+                              // Filter and prepare employee data
+                              const filteredEmployees = employees.filter(emp => 
+                                emp.manager_id === selectedManagerForTeamPerf &&
+                                (teamPerfEmployeeFilter === 'all' || emp.user_id === teamPerfEmployeeFilter)
+                              );
+
+                              // Calculate metrics for each employee
+                              const employeeData = filteredEmployees.map((emp) => {
+                                const empCalls = teamPerfFilteredCalls.filter(c => c.employee_id === emp.user_id);
+                                const relevantCalls = empCalls.filter(c => c.outcome === 'completed' && (c.exotel_duration || 0) >= 30);
+                                const irrelevantCalls = empCalls.filter(c => c.outcome === 'completed' && (c.exotel_duration || 0) < 30);
+                                const contactedCalls = empCalls.filter(c => c.outcome === 'completed');
+                                const notAnsweredCalls = empCalls.filter(c => c.outcome === 'no-answer');
+                                const failedCalls = empCalls.filter(c => c.outcome === 'Failed');
+                                const busyCalls = empCalls.filter(c => c.outcome === 'busy');
+                                
+                                const validCalls = empCalls.filter(call => (call.exotel_duration || 0) >= 45);
+                                const totalDuration = validCalls.reduce((sum, call) => sum + (call.exotel_duration || 0), 0);
+                                const avgTalkTime = validCalls.length > 0 ? Math.round(totalDuration / validCalls.length) : 0;
+
+                                return {
+                                  emp,
+                                  empCalls,
+                                  relevantCalls,
+                                  irrelevantCalls,
+                                  contactedCalls,
+                                  notAnsweredCalls,
+                                  failedCalls,
+                                  busyCalls,
+                                  totalDuration,
+                                  avgTalkTime
+                                };
+                              });
+
+                              // Sort employee data
+                              const sortedEmployeeData = [...employeeData].sort((a, b) => {
+                                let compareValue = 0;
+                                switch (teamPerfSortBy) {
+                                  case 'name':
+                                    compareValue = (a.emp.profile?.full_name || a.emp.full_name || '').localeCompare(b.emp.profile?.full_name || b.emp.full_name || '');
+                                    break;
+                                  case 'totalCalls':
+                                    compareValue = a.empCalls.length - b.empCalls.length;
+                                    break;
+                                  case 'relevantCalls':
+                                    compareValue = a.relevantCalls.length - b.relevantCalls.length;
+                                    break;
+                                  case 'irrelevantCalls':
+                                    compareValue = a.irrelevantCalls.length - b.irrelevantCalls.length;
+                                    break;
+                                  case 'contacted':
+                                    compareValue = a.contactedCalls.length - b.contactedCalls.length;
+                                    break;
+                                  case 'notAnswered':
+                                    compareValue = a.notAnsweredCalls.length - b.notAnsweredCalls.length;
+                                    break;
+                                  case 'failed':
+                                    compareValue = a.failedCalls.length - b.failedCalls.length;
+                                    break;
+                                  case 'busy':
+                                    compareValue = a.busyCalls.length - b.busyCalls.length;
+                                    break;
+                                  case 'duration':
+                                    compareValue = a.totalDuration - b.totalDuration;
+                                    break;
+                                  case 'avgTime':
+                                    compareValue = a.avgTalkTime - b.avgTalkTime;
+                                    break;
+                                }
+                                return teamPerfSortOrder === 'asc' ? compareValue : -compareValue;
+                              });
+
+                              return (
+                                <>
+                                  {sortedEmployeeData.map(({ emp, empCalls, relevantCalls, irrelevantCalls, contactedCalls, notAnsweredCalls, failedCalls, busyCalls, totalDuration, avgTalkTime }, idx) => {
+                                    const hours = Math.floor(totalDuration / 3600);
+                                    const minutes = Math.floor((totalDuration % 3600) / 60);
+                                    const seconds = totalDuration % 60;
+                                    const formattedDuration = `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                                    const avgMinutes = Math.floor(avgTalkTime / 60);
+                                    const avgSeconds = avgTalkTime % 60;
+                                    const formattedAvgTime = `${avgMinutes}:${avgSeconds.toString().padStart(2, '0')}`;
+                                    const initials = (emp.profile?.full_name || emp.full_name || emp.email)?.split(' ').map(n => n[0]).join('').slice(0,2).toUpperCase();
+                                    
+                                    return (
+                                      <tr key={emp.id} className={`border-b transition-colors ${idx % 2 === 0 ? 'bg-gray-50' : 'bg-white'} hover:bg-blue-50`}>
+                                        <td className="py-3 px-2 flex items-center gap-2">
+                                          <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-purple-100 text-purple-700 font-bold text-sm mr-2">{initials}</span>
+                                          <span>{emp.profile?.full_name || emp.full_name || emp.email}</span>
+                                        </td>
+                                        <td className="text-right py-3 px-2">{empCalls.length}</td>
+                                        <td className="text-right py-3 px-2"><span className="inline-block bg-green-100 text-green-700 rounded px-2 font-semibold">{relevantCalls.length}</span></td>
+                                        <td className="text-right py-3 px-2"><span className="inline-block bg-gray-200 text-gray-700 rounded px-2">{irrelevantCalls.length}</span></td>
+                                        <td className="text-right py-3 px-2"><span className="inline-block bg-green-100 text-green-700 rounded px-2">{contactedCalls.length}</span></td>
+                                        <td className="text-right py-3 px-2"><span className="inline-block bg-blue-100 text-blue-700 rounded px-2">{notAnsweredCalls.length}</span></td>
+                                        <td className="text-right py-3 px-2"><span className="inline-block bg-red-100 text-red-700 rounded px-2">{failedCalls.length}</span></td>
+                                        <td className="text-right py-3 px-2"><span className="inline-block bg-orange-100 text-orange-700 rounded px-2">{busyCalls.length}</span></td>
+                                        <td className="text-right py-3 px-2 font-medium">{formattedDuration}</td>
+                                        <td className="text-right py-3 px-2 font-medium">{formattedAvgTime}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                  {teamPerfEmployeeFilter === 'all' && sortedEmployeeData.length > 0 && (() => {
+                                    // Use teamPerfFilteredCalls directly - it's already filtered for this manager's team
+                                    const totalCalls = teamPerfFilteredCalls.length;
+                                    const totalRelevant = teamPerfFilteredCalls.filter(c => c.outcome === 'completed' && (c.exotel_duration || 0) >= 30).length;
+                                    const totalIrrelevant = teamPerfFilteredCalls.filter(c => c.outcome === 'completed' && (c.exotel_duration || 0) < 30).length;
+                                    const totalContacted = teamPerfFilteredCalls.filter(c => c.outcome === 'completed').length;
+                                    const totalNotAnswered = teamPerfFilteredCalls.filter(c => c.outcome === 'no-answer').length;
+                                    const totalFailed = teamPerfFilteredCalls.filter(c => c.outcome === 'Failed').length;
+                                    const totalBusy = teamPerfFilteredCalls.filter(c => c.outcome === 'busy').length;
+                                    
+                                    const grandValidCalls = teamPerfFilteredCalls.filter(call => (call.exotel_duration || 0) >= 45);
+                                    const grandTotalDuration = grandValidCalls.reduce((sum, call) => sum + (call.exotel_duration || 0), 0);
+                                    const grandHours = Math.floor(grandTotalDuration / 3600);
+                                    const grandMinutes = Math.floor((grandTotalDuration % 3600) / 60);
+                                    const grandSeconds = grandTotalDuration % 60;
+                                    const grandFormattedDuration = `${grandHours}:${grandMinutes.toString().padStart(2, '0')}:${grandSeconds.toString().padStart(2, '0')}`;
+                                    
+                                    const grandAvgTalkTime = grandValidCalls.length > 0 ? Math.round(grandTotalDuration / grandValidCalls.length) : 0;
+                                    const grandAvgMinutes = Math.floor(grandAvgTalkTime / 60);
+                                    const grandAvgSeconds = grandAvgTalkTime % 60;
+                                    const grandFormattedAvgTime = `${grandAvgMinutes}:${grandAvgSeconds.toString().padStart(2, '0')}`;
+                                    
+                                    return (
+                                      <tr className="border-t-2 font-bold bg-muted/30">
+                                        <td className="py-3 px-2">Total</td>
+                                        <td className="text-right py-3 px-2">{totalCalls}</td>
+                                        <td className="text-right py-3 px-2 text-green-600">{totalRelevant}</td>
+                                        <td className="text-right py-3 px-2 text-gray-500">{totalIrrelevant}</td>
+                                        <td className="text-right py-3 px-2 text-green-600">{totalContacted}</td>
+                                        <td className="text-right py-3 px-2 text-blue-600">{totalNotAnswered}</td>
+                                        <td className="text-right py-3 px-2 text-red-600">{totalFailed}</td>
+                                        <td className="text-right py-3 px-2 text-orange-600">{totalBusy}</td>
+                                        <td className="text-right py-3 px-2">{grandFormattedDuration}</td>
+                                        <td className="text-right py-3 px-2">{grandFormattedAvgTime}</td>
+                                      </tr>
+                                    );
+                                  })()}
+                                  {sortedEmployeeData.length === 0 && (
+                                    <tr>
+                                      <td colSpan={10} className="text-center py-8 text-muted-foreground">
+                                        {teamPerfEmployeeFilter === 'all' ? 'No team members found for this manager' : 'No data available for selected employee'}
+                                      </td>
+                                    </tr>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </tbody>
+                        </table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </>
+              ) : (
+                <Card>
+                  <CardContent className="py-12">
+                    <div className="text-center text-muted-foreground">
+                      <Users className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                      <p>Select a manager above to view their team's performance metrics</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           )}
 
