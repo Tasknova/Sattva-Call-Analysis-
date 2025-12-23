@@ -2307,6 +2307,11 @@ export default function AdminDashboard() {
     return matchesSearch && matchesEmployee && matchesProbability;
   });
 
+  // Reset call history page to 1 when filters change
+  useEffect(() => {
+    setCallHistoryPage(1);
+  }, [callDateFilter, selectedManagerFilter, selectedEmployeeFilter, callOutcomeFilter, callSearch]);
+
   // Set first manager as selected by default
   useEffect(() => {
     if (managers.length > 0 && !selectedManager) {
@@ -2377,37 +2382,51 @@ export default function AdminDashboard() {
   // Specific date filter for Call History header/table (driven by callDateFilter)
   const callDateFilteredCalls = useMemo(() => {
     const now = new Date();
-    const currentTime = now.getTime();
+
+    // Get local date string in YYYY-MM-DD format
+    const getLocalDateStr = (date: Date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    // Helper function to extract YYYY-MM-DD from any date string format
+    const extractDateStr = (dateString: string): string => {
+      if (!dateString) return '';
+      // Handle: "2025-12-22T15:03:30" OR "2025-12-22 15:03:30+00"
+      return dateString.substring(0, 10); // Just take first 10 chars: YYYY-MM-DD
+    };
 
     return calls.filter(call => {
-      const callTime = new Date(call.call_date || call.created_at || '').getTime();
-      if (Number.isNaN(callTime)) return false;
+      const dateToUse = call.call_date || call.created_at;
+      if (!dateToUse) return false;
+
+      // Extract date portion only (YYYY-MM-DD) to avoid timezone issues
+      const callDateStr = extractDateStr(dateToUse);
 
       if (callDateFilter === 'today') {
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-        return callTime >= todayStart.getTime() && callTime <= todayEnd.getTime();
+        const todayStr = getLocalDateStr(now);
+        return callDateStr === todayStr;
       } else if (callDateFilter === 'yesterday') {
-        const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-        const yesterdayStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
-        const yesterdayEnd = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59, 999);
-        return callTime >= yesterdayStart.getTime() && callTime <= yesterdayEnd.getTime();
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = getLocalDateStr(yesterday);
+        return callDateStr === yesterdayStr;
       } else if (callDateFilter === 'week') {
-        const dayOfWeek = now.getDay();
-        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-        const weekStart = new Date(now);
-        weekStart.setDate(now.getDate() - daysFromMonday);
-        weekStart.setHours(0, 0, 0, 0);
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 4);
-        weekEnd.setHours(23, 59, 59, 999);
-        return callTime >= weekStart.getTime() && callTime <= weekEnd.getTime();
+        // Last 7 days including today
+        const weekAgo = new Date(now);
+        weekAgo.setDate(weekAgo.getDate() - 6);
+        const weekAgoStr = getLocalDateStr(weekAgo);
+        const todayStr = getLocalDateStr(now);
+        return callDateStr >= weekAgoStr && callDateStr <= todayStr;
       } else if (callDateFilter === 'month') {
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        monthStart.setHours(0, 0, 0, 0);
-        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-        monthEnd.setHours(23, 59, 59, 999);
-        return callTime >= monthStart.getTime() && callTime <= monthEnd.getTime();
+        // Last 30 days including today
+        const monthAgo = new Date(now);
+        monthAgo.setDate(monthAgo.getDate() - 29);
+        const monthAgoStr = getLocalDateStr(monthAgo);
+        const todayStr = getLocalDateStr(now);
+        return callDateStr >= monthAgoStr && callDateStr <= todayStr;
       }
       return true;
     });
@@ -4365,7 +4384,8 @@ export default function AdminDashboard() {
                           .map(a => a.recordings?.call_history_id)
                           .filter(Boolean)
                       );
-                      return baseFilteredCalls.filter(c => followUpCallIds.has(c.id)).length;
+                      // Include calls with follow-up details OR no-answer outcome
+                      return baseFilteredCalls.filter(c => followUpCallIds.has(c.id) || c.outcome === 'no-answer').length;
                     })()})
                   </button>
                   <button
@@ -4395,7 +4415,10 @@ export default function AdminDashboard() {
                   </TableHeader>
                   <TableBody>
                     {(() => {
-                      let filteredCalls = calls;
+                      // Start with baseFilteredCalls which already has date, manager, employee filters applied
+                      let filteredCalls = baseFilteredCalls.slice();
+                      
+                      // Apply outcome filter
                       if (callOutcomeFilter !== 'all') {
                         if (callOutcomeFilter === 'followup') {
                           const followUpCallIds = new Set(
@@ -4409,85 +4432,14 @@ export default function AdminDashboard() {
                               .map(a => a.recordings?.call_history_id)
                               .filter(Boolean)
                           );
-                          filteredCalls = filteredCalls.filter(call => followUpCallIds.has(call.id));
+                          // Include calls with follow-up details OR no-answer outcome
+                          filteredCalls = filteredCalls.filter(call => followUpCallIds.has(call.id) || call.outcome === 'no-answer');
                         } else {
                           filteredCalls = filteredCalls.filter(call => call.outcome === callOutcomeFilter);
                         }
                       }
 
-                      // Manager filter: when admin selects a manager, show calls for
-                      // employees under that manager. The DB may store manager references
-                      // either as manager.id or manager.user_id on employee.manager_id,
-                      // and call.employees?.manager_id may use either as well. Try both.
-                      if (selectedManagerFilter && selectedManagerFilter !== 'all') {
-                        const managerUserId = managers.find(m => m.id === selectedManagerFilter)?.user_id;
-                        filteredCalls = filteredCalls.filter(call => {
-                          const callManagerId = call.employees?.manager_id;
-                          if (!callManagerId) {
-                            // fallback: try to find the employee record and check its manager
-                            const emp = employees.find(e => e.user_id === call.employee_id || e.id === call.employee_id);
-                            if (!emp) return false;
-                            return emp.manager_id === selectedManagerFilter || (managerUserId && emp.manager_id === managerUserId);
-                          }
-                          return callManagerId === selectedManagerFilter || (managerUserId && callManagerId === managerUserId);
-                        });
-                      }
-
-                      if (selectedEmployeeFilter && selectedEmployeeFilter !== 'all') {
-                        filteredCalls = filteredCalls.filter(call => call.employee_id === selectedEmployeeFilter);
-                      }
-
-                      if (callSearch && callSearch.trim() !== '') {
-                        const q = callSearch.trim().toLowerCase();
-                        filteredCalls = filteredCalls.filter(call => {
-                          const leadName = (call.leads?.name || '').toLowerCase();
-                          const contact = (call.leads?.contact || '').toLowerCase();
-                          return leadName.includes(q) || contact.includes(q);
-                        });
-                      }
-
-                      const now = new Date();
-                      if (callDateFilter === 'today') {
-                        const todayDateStr = now.toISOString().split('T')[0];
-                        filteredCalls = filteredCalls.filter(call => {
-                          if (!call.call_date) return false;
-                          const callDate = new Date(call.call_date);
-                          const callDateStr = callDate.toISOString().split('T')[0];
-                          return callDateStr === todayDateStr;
-                        });
-                      } else if (callDateFilter === 'yesterday') {
-                        const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-                        const yesterdayDateStr = yesterday.toISOString().split('T')[0];
-                        filteredCalls = filteredCalls.filter(call => {
-                          if (!call.call_date) return false;
-                          const callDate = new Date(call.call_date);
-                          const callDateStr = callDate.toISOString().split('T')[0];
-                          return callDateStr === yesterdayDateStr;
-                        });
-                      } else if (callDateFilter === 'week') {
-                        const dayOfWeek = now.getDay();
-                        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-                        const weekStart = new Date(now);
-                        weekStart.setDate(now.getDate() - daysFromMonday);
-                        weekStart.setHours(0, 0, 0, 0);
-                        const weekEnd = new Date(weekStart);
-                        weekEnd.setDate(weekStart.getDate() + 4);
-                        weekEnd.setHours(23, 59, 59, 999);
-                        filteredCalls = filteredCalls.filter(call => {
-                          const callTime = new Date(call.call_date || call.created_at).getTime();
-                          return callTime >= weekStart.getTime() && callTime <= weekEnd.getTime();
-                        });
-                      } else if (callDateFilter === 'month') {
-                        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-                        monthStart.setHours(0, 0, 0, 0);
-                        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-                        monthEnd.setHours(23, 59, 59, 999);
-                        filteredCalls = filteredCalls.filter(call => {
-                          const callTime = new Date(call.call_date || call.created_at).getTime();
-                          return callTime >= monthStart.getTime() && callTime <= monthEnd.getTime();
-                        });
-                      }
-
+                      // Apply sorting
                       if (callSortBy === 'date') {
                         filteredCalls.sort((a: any, b: any) => {
                           const at = new Date(a.call_date || a.created_at).getTime();
@@ -4615,39 +4567,20 @@ export default function AdminDashboard() {
               
               {/* Call History Pagination */}
               {(() => {
-                // Calculate total for pagination display (simplified version)
-                let filteredCalls = calls;
+                // Start with baseFilteredCalls which already has date, manager, employee, search filters applied
+                let filteredCalls = baseFilteredCalls.slice();
+                
+                // Apply outcome filter (same logic as table)
                 if (callOutcomeFilter !== 'all') {
                   if (callOutcomeFilter === 'followup') {
                     const followUpCallIds = new Set(analyses.filter(a => a.follow_up_details && a.follow_up_details.trim().length > 0 && !a.follow_up_details.toLowerCase().includes('irrelevant according to transcript') && a.recordings?.call_history_id).map(a => a.recordings?.call_history_id).filter(Boolean));
-                    filteredCalls = filteredCalls.filter(call => followUpCallIds.has(call.id));
+                    // Include calls with follow-up details OR no-answer outcome
+                    filteredCalls = filteredCalls.filter(call => followUpCallIds.has(call.id) || call.outcome === 'no-answer');
                   } else {
                     filteredCalls = filteredCalls.filter(call => call.outcome === callOutcomeFilter);
                   }
                 }
-                if (selectedManagerFilter && selectedManagerFilter !== 'all') {
-                  const managerUserId = managers.find(m => m.id === selectedManagerFilter)?.user_id;
-                  filteredCalls = filteredCalls.filter(call => {
-                    const callManagerId = call.employees?.manager_id;
-                    if (!callManagerId) {
-                      const emp = employees.find(e => e.user_id === call.employee_id || e.id === call.employee_id);
-                      if (!emp) return false;
-                      return emp.manager_id === selectedManagerFilter || (managerUserId && emp.manager_id === managerUserId);
-                    }
-                    return callManagerId === selectedManagerFilter || (managerUserId && callManagerId === managerUserId);
-                  });
-                }
-                if (selectedEmployeeFilter && selectedEmployeeFilter !== 'all') {
-                  filteredCalls = filteredCalls.filter(call => call.employee_id === selectedEmployeeFilter);
-                }
-                if (callSearch && callSearch.trim() !== '') {
-                  const q = callSearch.trim().toLowerCase();
-                  filteredCalls = filteredCalls.filter(call => {
-                    const leadName = (call.leads?.name || '').toLowerCase();
-                    const contact = (call.leads?.contact || '').toLowerCase();
-                    return leadName.includes(q) || contact.includes(q);
-                  });
-                }
+                
                 const totalItems = filteredCalls.length;
                 const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
                 
