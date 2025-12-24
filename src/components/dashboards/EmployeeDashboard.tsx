@@ -16,7 +16,11 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { useToast } from "@/hooks/use-toast";
+import { format } from "date-fns";
+import { cn } from "@/lib/utils";
 import EmployeeProfilePage from "@/components/EmployeeProfilePage";
 import EmployeeReportsPage from "@/components/EmployeeReportsPage";
 import PhoneDialer from "@/components/PhoneDialer";
@@ -271,6 +275,9 @@ export default function EmployeeDashboard() {
   const [removalReason, setRemovalReason] = useState("");
   const [isDialerModalOpen, setIsDialerModalOpen] = useState(false);
   const [processingCalls, setProcessingCalls] = useState<Set<string>>(new Set());
+  
+  // Specific date picker for call history
+  const [selectedCallDate, setSelectedCallDate] = useState<Date | undefined>(undefined);
 
   // Update selected tab when URL changes
   useEffect(() => {
@@ -566,99 +573,6 @@ export default function EmployeeDashboard() {
             });
             return newSet;
           });
-        }
-      }
-
-      // Create/update daily productivity record with login time from first call and logout time from last call
-      if (employeeData?.id && mergedCalls && mergedCalls.length > 0) {
-        // Get today's date in local timezone
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const todayStr = today.toISOString().split('T')[0];
-        
-        // Get yesterday's date for historical updates
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayStr = yesterday.toISOString().split('T')[0];
-        
-        // Process both today and yesterday
-        const datesToProcess = [
-          { date: todayStr, dateObj: today },
-          { date: yesterdayStr, dateObj: yesterday }
-        ];
-        
-        for (const { date: dateStr, dateObj } of datesToProcess) {
-          // Find calls made on this date
-          const dateCalls = mergedCalls.filter(call => {
-            if (!call.call_date) return false;
-            const callDate = new Date(call.call_date);
-            const callDateStr = new Date(callDate.getTime() - callDate.getTimezoneOffset() * 60000)
-              .toISOString()
-              .split('T')[0];
-            return callDateStr === dateStr;
-          });
-          
-          // If there are calls on this date
-          if (dateCalls.length > 0) {
-            // Sort by call_date to find first and last call
-            dateCalls.sort((a, b) => {
-              const dateA = new Date(a.call_date!).getTime();
-              const dateB = new Date(b.call_date!).getTime();
-              return dateA - dateB;
-            });
-            
-            const firstCall = dateCalls[0];
-            const lastCall = dateCalls[dateCalls.length - 1];
-            
-            // Extract time directly from the string (times are in IST)
-            // Format: "2025-12-23 11:33:18+00" -> extract "11:33:18"
-            const loginTime = firstCall.call_date!.substring(11, 19); // HH:MM:SS
-            const logoutTime = lastCall.call_date!.substring(11, 19); // HH:MM:SS
-            
-            // Check if productivity record exists for this date
-            const { data: existingRecord } = await supabase
-              .from('employee_daily_productivity')
-              .select('login_time, logout_time')
-              .eq('employee_id', employeeData.id)
-              .eq('date', dateStr)
-              .single();
-            
-            // Prepare update data
-            const updateData: any = {
-              employee_id: employeeData.id,
-              company_id: employeeData.company_id,
-              manager_id: employeeData.manager_id,
-              date: dateStr,
-              updated_at: new Date().toISOString()
-            };
-            
-            // Only update login_time if it doesn't exist
-            if (!existingRecord || !existingRecord.login_time) {
-              updateData.login_time = loginTime;
-            }
-            
-            // Always update logout_time with the latest last call time
-            updateData.logout_time = logoutTime;
-            
-            const { error: upsertError } = await supabase
-              .from('employee_daily_productivity')
-              .upsert(updateData, {
-                onConflict: 'employee_id,date',
-                ignoreDuplicates: false
-              });
-            
-            if (upsertError) {
-              console.error('Error creating/updating daily productivity record:', upsertError);
-            } else {
-              console.log('EmployeeDashboard - Created/updated daily productivity record:', {
-                date: dateStr,
-                login_time: updateData.login_time || '(existing)',
-                logout_time: logoutTime,
-                first_call_date: firstCall.call_date,
-                last_call_date: lastCall.call_date
-              });
-            }
-          }
         }
       }
 
@@ -1217,9 +1131,11 @@ Please provide insights that are specific, actionable, and tailored to these met
   };
 
   const handleRemoveLead = (lead: Lead) => {
-    setSelectedLeadToRemove(lead);
-    setRemovalReason("");
-    setIsRemoveLeadModalOpen(true);
+    toast({
+      title: 'Permission Denied',
+      description: "You don't have permission to remove leads.",
+      variant: 'destructive',
+    });
   };
 
   const handleConfirmRemoveLead = async () => {
@@ -2022,54 +1938,51 @@ Please provide insights that are specific, actionable, and tailored to these met
   const dateFilteredCalls = useMemo(() => {
     const now = new Date();
     
+    // Helper to get local date string in YYYY-MM-DD format
+    const getLocalDateStr = (date: Date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    // Helper to extract YYYY-MM-DD from timestamp string
+    const extractDateStr = (dateString: string): string => {
+      if (!dateString) return '';
+      return dateString.substring(0, 10); // Just take first 10 chars: YYYY-MM-DD
+    };
+    
     const filtered = calls.filter(call => {
-      if (!call.call_date) return false;
-      const date = new Date(call.call_date);
+      const dateToUse = call.call_date || call.created_at;
+      if (!dateToUse) return false;
+      
+      // Extract date portion only (YYYY-MM-DD) to avoid timezone issues
+      const callDateStr = extractDateStr(dateToUse);
       
       if (dateFilter === 'today') {
-        // Compare only the date part from call_date field (YYYY-MM-DD) in UTC
-        const callDateUTC = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-        const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-        return callDateUTC.getTime() === todayUTC.getTime();
+        const todayStr = getLocalDateStr(now);
+        return callDateStr === todayStr;
       } else if (dateFilter === 'yesterday') {
-        const callDateUTC = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-        const yesterdayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
-        return callDateUTC.getTime() === yesterdayUTC.getTime();
+        const yesterday = new Date(now);
+        yesterday.setDate(now.getDate() - 1);
+        const yesterdayStr = getLocalDateStr(yesterday);
+        return callDateStr === yesterdayStr;
       } else if (dateFilter === 'week') {
-        // Monday to Friday of current week
-        const callDateOnly = date.toISOString().split('T')[0];
-        const callDateObj = new Date(callDateOnly + 'T00:00:00Z');
-        
-        const weekStart = new Date(now);
-        const dayOfWeek = now.getDay();
-        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-        weekStart.setDate(now.getDate() - daysFromMonday);
-        weekStart.setHours(0, 0, 0, 0);
-        
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 4); // Friday
-        weekEnd.setHours(23, 59, 59, 999);
-        
-        return callDateObj.getTime() >= weekStart.getTime() && callDateObj.getTime() <= weekEnd.getTime();
+        // Last 7 days including today
+        const weekAgo = new Date(now);
+        weekAgo.setDate(now.getDate() - 6);
+        const weekAgoStr = getLocalDateStr(weekAgo);
+        const todayStr = getLocalDateStr(now);
+        return callDateStr >= weekAgoStr && callDateStr <= todayStr;
       } else if (dateFilter === 'month') {
-        // Entire current month
-        const callDateOnly = date.toISOString().split('T')[0];
-        const callDateObj = new Date(callDateOnly + 'T00:00:00Z');
-        
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        monthStart.setHours(0, 0, 0, 0);
-        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-        monthEnd.setHours(23, 59, 59, 999);
-        return callDateObj.getTime() >= monthStart.getTime() && callDateObj.getTime() <= monthEnd.getTime();
+        // Last 30 days including today
+        const monthAgo = new Date(now);
+        monthAgo.setDate(now.getDate() - 29);
+        const monthAgoStr = getLocalDateStr(monthAgo);
+        const todayStr = getLocalDateStr(now);
+        return callDateStr >= monthAgoStr && callDateStr <= todayStr;
       } else if (dateFilter === 'custom' && customDateRange.startDate && customDateRange.endDate) {
-        const callDateOnly = date.toISOString().split('T')[0];
-        const callDateObj = new Date(callDateOnly + 'T00:00:00Z');
-        
-        const start = new Date(customDateRange.startDate);
-        start.setHours(0, 0, 0, 0);
-        const end = new Date(customDateRange.endDate);
-        end.setHours(23, 59, 59, 999);
-        return callDateObj.getTime() >= start.getTime() && callDateObj.getTime() <= end.getTime();
+        return callDateStr >= customDateRange.startDate && callDateStr <= customDateRange.endDate;
       }
       return true;
     });
@@ -2139,6 +2052,31 @@ Please provide insights that are specific, actionable, and tailored to these met
   const visibleFilteredCalls = useMemo(() => {
     let filtered = calls.slice();
 
+    // Helper to get local date string in YYYY-MM-DD format
+    const getLocalDateStr = (date: Date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    // Helper to extract YYYY-MM-DD from timestamp string
+    const extractDateStr = (dateString: string): string => {
+      if (!dateString) return '';
+      return dateString.substring(0, 10); // Just take first 10 chars: YYYY-MM-DD
+    };
+
+    // Apply specific date filter if selected
+    if (selectedCallDate) {
+      const selectedDateStr = getLocalDateStr(selectedCallDate);
+      filtered = filtered.filter(call => {
+        const dateToUse = call.call_date || call.created_at;
+        if (!dateToUse) return false;
+        const callDateStr = extractDateStr(dateToUse);
+        return callDateStr === selectedDateStr;
+      });
+    }
+
     // Outcome filter
     if (callOutcomeFilter && callOutcomeFilter !== 'all') {
       if (callOutcomeFilter === 'followup') {
@@ -2151,43 +2089,69 @@ Please provide insights that are specific, actionable, and tailored to these met
             .map(a => a.recordings?.call_history_id)
             .filter(Boolean)
         );
-        filtered = filtered.filter(c => followUpCallIds.has(c.id));
+        filtered = filtered.filter(c => followUpCallIds.has(c.id) || c.outcome === 'no-answer');
+      } else if (callOutcomeFilter === 'relevant') {
+        // Relevant: duration > 30s AND NOT (failed or no-answer or busy)
+        filtered = filtered.filter(c => {
+          const outcome = (c.outcome || '').toLowerCase();
+          const isFailed = outcome === 'failed';
+          const isNoAnswer = outcome === 'no-answer';
+          const isBusy = outcome === 'busy';
+          return (c.exotel_duration || 0) > 30 && !isFailed && !isNoAnswer && !isBusy;
+        });
+      } else if (callOutcomeFilter === 'irrelevant') {
+        // Irrelevant: duration <= 30s AND NOT (failed or no-answer or busy)
+        filtered = filtered.filter(c => {
+          const outcome = (c.outcome || '').toLowerCase();
+          const isFailed = outcome === 'failed';
+          const isNoAnswer = outcome === 'no-answer';
+          const isBusy = outcome === 'busy';
+          return (c.exotel_duration || 0) <= 30 && !isFailed && !isNoAnswer && !isBusy;
+        });
       } else {
         filtered = filtered.filter(c => (c.outcome || '').toLowerCase() === callOutcomeFilter.toLowerCase());
       }
     }
 
-    // Date filter
+    // Date filter - use string comparison to avoid timezone issues
     const now = new Date();
     if (callDateFilter === 'today') {
-      const todayStr = now.toISOString().split('T')[0];
-      filtered = filtered.filter(call => call.call_date && new Date(call.call_date).toISOString().split('T')[0] === todayStr);
+      const todayStr = getLocalDateStr(now);
+      filtered = filtered.filter(call => {
+        const dateToUse = call.call_date || call.created_at;
+        return dateToUse && extractDateStr(dateToUse) === todayStr;
+      });
     } else if (callDateFilter === 'yesterday') {
       const yesterday = new Date(now);
       yesterday.setDate(now.getDate() - 1);
-      const yStr = yesterday.toISOString().split('T')[0];
-      filtered = filtered.filter(call => call.call_date && new Date(call.call_date).toISOString().split('T')[0] === yStr);
-    } else if (callDateFilter === 'week') {
-      const dayOfWeek = now.getDay();
-      const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-      const weekStart = new Date(now);
-      weekStart.setDate(now.getDate() - daysFromMonday);
-      weekStart.setHours(0, 0, 0, 0);
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekStart.getDate() + 4);
-      weekEnd.setHours(23, 59, 59, 999);
+      const yesterdayStr = getLocalDateStr(yesterday);
       filtered = filtered.filter(call => {
-        const t = new Date(call.call_date || call.created_at).getTime();
-        return t >= weekStart.getTime() && t <= weekEnd.getTime();
+        const dateToUse = call.call_date || call.created_at;
+        return dateToUse && extractDateStr(dateToUse) === yesterdayStr;
+      });
+    } else if (callDateFilter === 'week') {
+      // Last 7 days including today
+      const weekAgo = new Date(now);
+      weekAgo.setDate(now.getDate() - 6);
+      const weekAgoStr = getLocalDateStr(weekAgo);
+      const todayStr = getLocalDateStr(now);
+      filtered = filtered.filter(call => {
+        const dateToUse = call.call_date || call.created_at;
+        if (!dateToUse) return false;
+        const callDateStr = extractDateStr(dateToUse);
+        return callDateStr >= weekAgoStr && callDateStr <= todayStr;
       });
     } else if (callDateFilter === 'month') {
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      monthStart.setHours(0, 0, 0, 0);
-      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      monthEnd.setHours(23, 59, 59, 999);
+      // Last 30 days including today
+      const monthAgo = new Date(now);
+      monthAgo.setDate(now.getDate() - 29);
+      const monthAgoStr = getLocalDateStr(monthAgo);
+      const todayStr = getLocalDateStr(now);
       filtered = filtered.filter(call => {
-        const t = new Date(call.call_date || call.created_at).getTime();
-        return t >= monthStart.getTime() && t <= monthEnd.getTime();
+        const dateToUse = call.call_date || call.created_at;
+        if (!dateToUse) return false;
+        const callDateStr = extractDateStr(dateToUse);
+        return callDateStr >= monthAgoStr && callDateStr <= todayStr;
       });
     }
     // Search filter
@@ -2222,51 +2186,57 @@ Please provide insights that are specific, actionable, and tailored to these met
     });
 
     return sorted;
-  }, [calls, analyses, callOutcomeFilter, callDateFilter, customDateRange.startDate, customDateRange.endDate, callSearch, callSortBy, callSortOrder]);
+  }, [calls, analyses, callOutcomeFilter, callDateFilter, customDateRange.startDate, customDateRange.endDate, callSearch, callSortBy, callSortOrder, selectedCallDate]);
 
   // callDateFilteredCalls: driven by `callDateFilter` used in the Call History UI
   const callDateFilteredCalls = useMemo(() => {
     const now = new Date();
+    
+    // Helper to get local date string in YYYY-MM-DD format
+    const getLocalDateStr = (date: Date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    // Helper to extract YYYY-MM-DD from timestamp string
+    const extractDateStr = (dateString: string): string => {
+      if (!dateString) return '';
+      return dateString.substring(0, 10); // Just take first 10 chars: YYYY-MM-DD
+    };
+
     return calls.filter(call => {
-      if (!call.call_date) return false;
-      const callTime = new Date(call.call_date || call.created_at || '').getTime();
-      if (Number.isNaN(callTime)) return false;
+      const dateToUse = call.call_date || call.created_at;
+      if (!dateToUse) return false;
+
+      // Extract date portion only (YYYY-MM-DD) to avoid timezone issues
+      const callDateStr = extractDateStr(dateToUse);
 
       if (callDateFilter === 'today' || dateFilter === 'today') {
-        const todayStr = now.toISOString().split('T')[0];
-        return new Date(call.call_date || call.created_at).toISOString().split('T')[0] === todayStr;
+        const todayStr = getLocalDateStr(now);
+        return callDateStr === todayStr;
       } else if (callDateFilter === 'yesterday' || dateFilter === 'yesterday') {
         const yesterday = new Date(now);
         yesterday.setDate(now.getDate() - 1);
-        const yStr = yesterday.toISOString().split('T')[0];
-        return new Date(call.call_date || call.created_at).toISOString().split('T')[0] === yStr;
+        const yesterdayStr = getLocalDateStr(yesterday);
+        return callDateStr === yesterdayStr;
       } else if (callDateFilter === 'week' || dateFilter === 'week') {
-        const dayOfWeek = now.getDay();
-        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-        const weekStart = new Date(now);
-        weekStart.setDate(now.getDate() - daysFromMonday);
-        weekStart.setHours(0,0,0,0);
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 4);
-        weekEnd.setHours(23,59,59,999);
-        const t = new Date(call.call_date || call.created_at).getTime();
-        return t >= weekStart.getTime() && t <= weekEnd.getTime();
+        // Last 7 days including today
+        const weekAgo = new Date(now);
+        weekAgo.setDate(now.getDate() - 6);
+        const weekAgoStr = getLocalDateStr(weekAgo);
+        const todayStr = getLocalDateStr(now);
+        return callDateStr >= weekAgoStr && callDateStr <= todayStr;
       } else if (callDateFilter === 'month' || dateFilter === 'month') {
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        monthStart.setHours(0,0,0,0);
-        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-        monthEnd.setHours(23,59,59,999);
-        const t = new Date(call.call_date || call.created_at).getTime();
-        return t >= monthStart.getTime() && t <= monthEnd.getTime();
+        // Last 30 days including today
+        const monthAgo = new Date(now);
+        monthAgo.setDate(now.getDate() - 29);
+        const monthAgoStr = getLocalDateStr(monthAgo);
+        const todayStr = getLocalDateStr(now);
+        return callDateStr >= monthAgoStr && callDateStr <= todayStr;
       } else if (dateFilter === 'custom' && customDateRange.startDate && customDateRange.endDate) {
-        const callDateOnly = new Date(call.call_date || call.created_at).toISOString().split('T')[0];
-        const callDateObj = new Date(callDateOnly + 'T00:00:00Z');
-        
-        const start = new Date(customDateRange.startDate);
-        start.setHours(0, 0, 0, 0);
-        const end = new Date(customDateRange.endDate);
-        end.setHours(23, 59, 59, 999);
-        return callDateObj.getTime() >= start.getTime() && callDateObj.getTime() <= end.getTime();
+        return callDateStr >= customDateRange.startDate && callDateStr <= customDateRange.endDate;
       }
       return true;
     });
@@ -2706,21 +2676,42 @@ Please provide insights that are specific, actionable, and tailored to these met
                     <div className="flex flex-col items-center">
                       <p className="text-4xl font-bold text-gray-900">
                         {(() => {
-                          if (dateFilteredDailyProductivity.length === 0) return '--:--';
-                          const loginTimes = dateFilteredDailyProductivity.filter(dp => dp.login_time);
-                          if (loginTimes.length === 0) return '--:--';
+                          if (calls.length === 0) return '--:--';
                           
-                          // For today or yesterday, show the actual login time
+                          // For today or yesterday, get first call time from that specific date
                           if (dateFilter === 'today' || dateFilter === 'yesterday') {
-                            return loginTimes[0].login_time.substring(0, 5); // Format HH:MM
+                            const dateCalls = dateFilteredCalls.filter(c => c.call_date);
+                            if (dateCalls.length === 0) return '--:--';
+                            
+                            // Find first call of the day
+                            const firstCall = dateCalls.reduce((earliest, call) => {
+                              return !earliest || call.call_date < earliest.call_date ? call : earliest;
+                            }, null);
+                            
+                            if (!firstCall) return '--:--';
+                            // Extract HH:MM from call_date string
+                            return firstCall.call_date.substring(11, 16);
                           }
                           
-                          // For other periods, calculate average
-                          const totalMinutes = loginTimes.reduce((sum, dp) => {
-                            const [hours, minutes] = dp.login_time.split(':').map(Number);
+                          // For week/month, calculate average first call time across days
+                          const daysMap = new Map();
+                          calls.filter(c => c.call_date).forEach(call => {
+                            const dateStr = call.call_date.substring(0, 10); // YYYY-MM-DD
+                            const timeStr = call.call_date.substring(11, 19); // HH:MM:SS
+                            
+                            if (!daysMap.has(dateStr) || timeStr < daysMap.get(dateStr)) {
+                              daysMap.set(dateStr, timeStr);
+                            }
+                          });
+                          
+                          if (daysMap.size === 0) return '--:--';
+                          
+                          // Calculate average of first call times
+                          const totalMinutes = Array.from(daysMap.values()).reduce((sum, timeStr) => {
+                            const [hours, minutes] = timeStr.split(':').map(Number);
                             return sum + (hours * 60 + minutes);
                           }, 0);
-                          const avgMinutes = Math.round(totalMinutes / loginTimes.length);
+                          const avgMinutes = Math.round(totalMinutes / daysMap.size);
                           const hours = Math.floor(avgMinutes / 60);
                           const mins = avgMinutes % 60;
                           return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
@@ -2739,14 +2730,22 @@ Please provide insights that are specific, actionable, and tailored to these met
                     <div className="flex flex-col items-center">
                       <p className="text-4xl font-bold text-gray-900">
                         {(() => {
-                          if (dateFilteredDailyProductivity.length === 0) return '--:--';
+                          if (calls.length === 0) return '--:--';
                           
                           // For today, calculate expected logout (9 hours after login)
                           if (dateFilter === 'today') {
-                            const loginTimes = dateFilteredDailyProductivity.filter(dp => dp.login_time);
-                            if (loginTimes.length === 0) return '--:--';
+                            const dateCalls = dateFilteredCalls.filter(c => c.call_date);
+                            if (dateCalls.length === 0) return '--:--';
                             
-                            const [hours, minutes] = loginTimes[0].login_time.split(':').map(Number);
+                            // Find first call of today
+                            const firstCall = dateCalls.reduce((earliest, call) => {
+                              return !earliest || call.call_date < earliest.call_date ? call : earliest;
+                            }, null);
+                            
+                            if (!firstCall) return '--:--';
+                            
+                            const timeStr = firstCall.call_date.substring(11, 19);
+                            const [hours, minutes] = timeStr.split(':').map(Number);
                             const loginMinutes = hours * 60 + minutes;
                             const expectedLogoutMinutes = loginMinutes + (9 * 60); // Add 9 hours
                             const logoutHours = Math.floor(expectedLogoutMinutes / 60);
@@ -2754,22 +2753,40 @@ Please provide insights that are specific, actionable, and tailored to these met
                             return `${logoutHours.toString().padStart(2, '0')}:${logoutMins.toString().padStart(2, '0')}`;
                           }
                           
-                          // For yesterday, show the actual logout time
+                          // For yesterday, show the actual last call time
                           if (dateFilter === 'yesterday') {
-                            const logoutTimes = dateFilteredDailyProductivity.filter(dp => dp.logout_time);
-                            if (logoutTimes.length === 0) return '--:--';
-                            return logoutTimes[0].logout_time.substring(0, 5); // Format HH:MM
+                            const dateCalls = dateFilteredCalls.filter(c => c.call_date);
+                            if (dateCalls.length === 0) return '--:--';
+                            
+                            // Find last call of yesterday
+                            const lastCall = dateCalls.reduce((latest, call) => {
+                              return !latest || call.call_date > latest.call_date ? call : latest;
+                            }, null);
+                            
+                            if (!lastCall) return '--:--';
+                            // Extract HH:MM from call_date string
+                            return lastCall.call_date.substring(11, 16);
                           }
                           
-                          // For other periods, calculate average logout time
-                          const logoutTimes = dateFilteredDailyProductivity.filter(dp => dp.logout_time);
-                          if (logoutTimes.length === 0) return '--:--';
+                          // For week/month, calculate average last call time across days
+                          const daysMap = new Map();
+                          calls.filter(c => c.call_date).forEach(call => {
+                            const dateStr = call.call_date.substring(0, 10); // YYYY-MM-DD
+                            const timeStr = call.call_date.substring(11, 19); // HH:MM:SS
+                            
+                            if (!daysMap.has(dateStr) || timeStr > daysMap.get(dateStr)) {
+                              daysMap.set(dateStr, timeStr);
+                            }
+                          });
                           
-                          const totalMinutes = logoutTimes.reduce((sum, dp) => {
-                            const [hours, minutes] = dp.logout_time.split(':').map(Number);
+                          if (daysMap.size === 0) return '--:--';
+                          
+                          // Calculate average of last call times
+                          const totalMinutes = Array.from(daysMap.values()).reduce((sum, timeStr) => {
+                            const [hours, minutes] = timeStr.split(':').map(Number);
                             return sum + (hours * 60 + minutes);
                           }, 0);
-                          const avgMinutes = Math.round(totalMinutes / logoutTimes.length);
+                          const avgMinutes = Math.round(totalMinutes / daysMap.size);
                           const hours = Math.floor(avgMinutes / 60);
                           const mins = avgMinutes % 60;
                           return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
@@ -2786,8 +2803,8 @@ Please provide insights that are specific, actionable, and tailored to these met
                 <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
                   <CardContent className="pt-6 pb-6">
                     <p className="text-sm font-medium text-gray-600 mb-2">Calls</p>
-                    <p className="text-4xl font-bold text-gray-900">
-                      {baseFilteredCalls.length}
+                    <p className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 whitespace-nowrap">
+                      {dateFilteredCalls.length}
                     </p>
                   </CardContent>
                 </Card>
@@ -2796,8 +2813,8 @@ Please provide insights that are specific, actionable, and tailored to these met
                 <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
                   <CardContent className="pt-6 pb-6">
                     <p className="text-sm font-medium text-gray-600 mb-2">Calls Connected</p>
-                    <p className="text-4xl font-bold text-gray-900">
-                      {baseFilteredCalls.filter(c => (c.outcome || '').toLowerCase() === 'completed').length}
+                    <p className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 whitespace-nowrap">
+                      {dateFilteredCalls.filter(c => (c.outcome || '').toLowerCase() === 'completed').length}
                     </p>
                   </CardContent>
                 </Card>
@@ -2806,10 +2823,10 @@ Please provide insights that are specific, actionable, and tailored to these met
                 <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
                   <CardContent className="pt-6 pb-6">
                     <p className="text-sm font-medium text-gray-600 mb-2">Avg. Talk time (per call)</p>
-                    <p className="text-4xl font-bold text-gray-900">
+                    <p className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 whitespace-nowrap">
                       {(() => {
                         // Use exotel_duration from calls, filter out calls with duration < 45 seconds
-                        const callsWithValidDuration = baseFilteredCalls.filter(c => 
+                        const callsWithValidDuration = dateFilteredCalls.filter(c => 
                           c.exotel_duration && c.exotel_duration >= 45
                         );
                         if (callsWithValidDuration.length === 0) return '00:00';
@@ -2827,10 +2844,10 @@ Please provide insights that are specific, actionable, and tailored to these met
                 <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
                   <CardContent className="pt-6 pb-6">
                     <p className="text-sm font-medium text-gray-600 mb-2">Total talk time</p>
-                    <p className="text-4xl font-bold text-gray-900">
+                    <p className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 whitespace-nowrap">
                       {(() => {
                         // Include ALL calls with any duration - do not filter anything
-                        const totalDuration = baseFilteredCalls.reduce((sum, c) => sum + (c.exotel_duration || 0), 0);
+                        const totalDuration = dateFilteredCalls.reduce((sum, c) => sum + (c.exotel_duration || 0), 0);
                         const totalMinutes = Math.floor(totalDuration / 60);
                         return totalMinutes + 'm';
                       })()}
@@ -2838,24 +2855,12 @@ Please provide insights that are specific, actionable, and tailored to these met
                   </CardContent>
                 </Card>
 
-                {/* Profile Utilization */}
+                {/* Calls Analyzed */}
                 <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
                   <CardContent className="pt-6 pb-6">
-                    <p className="text-sm font-medium text-gray-600 mb-2">Profile Utilization</p>
-                    <p className="text-4xl font-bold text-gray-900">
-                      {(() => {
-                        const profilesDownloaded = dateFilteredDailyProductivity.reduce((sum, dp) => sum + (dp.profiles_downloaded || 0), 0);
-                        // Count unique phone numbers called (not duplicate calls to same number)
-                        const uniquePhoneNumbers = new Set(
-                          baseFilteredCalls
-                            .map(c => c.exotel_to_number || c.exotel_from_number)
-                            .filter(num => num) // Remove null/undefined
-                        );
-                        const uniqueCallsMade = uniquePhoneNumbers.size;
-                        if (profilesDownloaded === 0) return '0%';
-                        const utilization = (uniqueCallsMade / profilesDownloaded) * 100;
-                        return Math.round(utilization) + '%';
-                      })()}
+                    <p className="text-sm font-medium text-gray-600 mb-2">Calls Analyzed</p>
+                    <p className="text-xl sm:text-2xl md:text-3xl font-bold text-blue-600 whitespace-nowrap">
+                      {dateFilteredAnalyses.length}
                     </p>
                   </CardContent>
                 </Card>
@@ -2881,7 +2886,10 @@ Please provide insights that are specific, actionable, and tailored to these met
                               const dateStr = date.toISOString().split('T')[0];
                               const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getDay()];
                               const dayCalls = calls.filter(c => {
-                                const callDate = new Date(c.created_at).toISOString().split('T')[0];
+                                const callDateStr = c.call_date || c.created_at;
+                                if (!callDateStr) return false;
+                                // Extract YYYY-MM-DD directly from string to avoid timezone issues
+                                const callDate = callDateStr.substring(0, 10);
                                 return callDate === dateStr;
                               }).length;
                               last7Days.push({
@@ -2927,14 +2935,26 @@ Please provide insights that are specific, actionable, and tailored to these met
 
                 {/* Additional Metrics */}
                 <div className="space-y-4">
-                  {/* First Row: Calls Analyzed and Failed Calls */}
+                  {/* First Row: Busy Calls and Failed Calls */}
                   <div className="grid grid-cols-2 gap-4">
-                    {/* Calls Analyzed */}
-                    <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
+                    {/* Busy Calls */}
+                    <Card 
+                      className="bg-white shadow-sm hover:shadow-md transition-shadow cursor-pointer hover:bg-gray-50"
+                      onClick={() => {
+                        setSelectedTab('calls');
+                        setCallDateFilter(
+                          dateFilter === 'today' ? 'today' :
+                          dateFilter === 'yesterday' ? 'yesterday' :
+                          dateFilter === 'week' ? 'week' :
+                          dateFilter === 'month' ? 'month' : 'all'
+                        );
+                        setCallOutcomeFilter('busy');
+                      }}
+                    >
                       <CardContent className="pt-6 pb-6">
-                        <p className="text-sm font-medium text-gray-600 mb-2">Calls Analyzed</p>
-                        <p className="text-4xl font-bold text-blue-600">
-                          {dateFilteredAnalyses.length}
+                        <p className="text-sm font-medium text-gray-600 mb-2">Busy Calls</p>
+                        <p className="text-xl sm:text-2xl md:text-3xl font-bold text-amber-600 whitespace-nowrap">
+                          {dateFilteredCalls.filter(c => (c.outcome || '').toLowerCase() === 'busy').length}
                         </p>
                       </CardContent>
                     </Card>
@@ -2955,8 +2975,8 @@ Please provide insights that are specific, actionable, and tailored to these met
                     >
                       <CardContent className="pt-6 pb-6">
                         <p className="text-sm font-medium text-gray-600 mb-2">Failed Calls</p>
-                        <p className="text-4xl font-bold text-red-600">
-                          {baseFilteredCalls.filter(c => (c.outcome || '').toLowerCase() === 'failed').length}
+                        <p className="text-xl sm:text-2xl md:text-3xl font-bold text-red-600 whitespace-nowrap">
+                          {dateFilteredCalls.filter(c => (c.outcome || '').toLowerCase() === 'failed').length}
                         </p>
                       </CardContent>
                     </Card>
@@ -2965,21 +2985,57 @@ Please provide insights that are specific, actionable, and tailored to these met
                   {/* Second Row: Relevant and Irrelevant Calls */}
                   <div className="grid grid-cols-2 gap-4">
                     {/* Relevant Calls */}
-                    <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
+                    <Card 
+                      className="bg-white shadow-sm hover:shadow-md transition-shadow cursor-pointer hover:bg-gray-50"
+                      onClick={() => {
+                        setSelectedTab('calls');
+                        setCallDateFilter(
+                          dateFilter === 'today' ? 'today' :
+                          dateFilter === 'yesterday' ? 'yesterday' :
+                          dateFilter === 'week' ? 'week' :
+                          dateFilter === 'month' ? 'month' : 'all'
+                        );
+                        setCallOutcomeFilter('relevant');
+                      }}
+                    >
                       <CardContent className="pt-6 pb-6">
                         <p className="text-sm font-medium text-gray-600 mb-2">Relevant Calls (&gt;30s)</p>
-                        <p className="text-4xl font-bold text-green-600">
-                          {baseFilteredCalls.filter(c => (c.exotel_duration || 0) > 30).length}
+                        <p className="text-xl sm:text-2xl md:text-3xl font-bold text-green-600 whitespace-nowrap">
+                          {dateFilteredCalls.filter(c => {
+                            const outcome = (c.outcome || '').toLowerCase();
+                            const isFailed = outcome === 'failed';
+                            const isNoAnswer = outcome === 'no-answer';
+                            const isBusy = outcome === 'busy';
+                            return (c.exotel_duration || 0) > 30 && !isFailed && !isNoAnswer && !isBusy;
+                          }).length}
                         </p>
                       </CardContent>
                     </Card>
 
                     {/* Irrelevant Calls */}
-                    <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
+                    <Card 
+                      className="bg-white shadow-sm hover:shadow-md transition-shadow cursor-pointer hover:bg-gray-50"
+                      onClick={() => {
+                        setSelectedTab('calls');
+                        setCallDateFilter(
+                          dateFilter === 'today' ? 'today' :
+                          dateFilter === 'yesterday' ? 'yesterday' :
+                          dateFilter === 'week' ? 'week' :
+                          dateFilter === 'month' ? 'month' : 'all'
+                        );
+                        setCallOutcomeFilter('irrelevant');
+                      }}
+                    >
                       <CardContent className="pt-6 pb-6">
                         <p className="text-sm font-medium text-gray-600 mb-2">Irrelevant Calls (&lt;30s)</p>
-                        <p className="text-4xl font-bold text-gray-600">
-                          {baseFilteredCalls.filter(c => (c.exotel_duration || 0) <= 30).length}
+                        <p className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-600 whitespace-nowrap">
+                          {dateFilteredCalls.filter(c => {
+                            const outcome = (c.outcome || '').toLowerCase();
+                            const isFailed = outcome === 'failed';
+                            const isNoAnswer = outcome === 'no-answer';
+                            const isBusy = outcome === 'busy';
+                            return (c.exotel_duration || 0) <= 30 && !isFailed && !isNoAnswer && !isBusy;
+                          }).length}
                         </p>
                       </CardContent>
                     </Card>
@@ -2995,10 +3051,10 @@ Please provide insights that are specific, actionable, and tailored to these met
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-sm text-gray-600 mb-1">Avg Calls per Day</p>
-                          <p className="text-3xl font-bold text-gray-900">
+                          <p className="text-2xl md:text-3xl font-bold text-gray-900 break-words">
                             {(() => {
-                              const uniqueDays = new Set(baseFilteredCalls.map(c => new Date(c.created_at).toISOString().split('T')[0]));
-                              return uniqueDays.size > 0 ? (baseFilteredCalls.length / uniqueDays.size).toFixed(1) : 0;
+                              const uniqueDays = new Set(dateFilteredCalls.map(c => new Date(c.created_at).toISOString().split('T')[0]));
+                              return uniqueDays.size > 0 ? (dateFilteredCalls.length / uniqueDays.size).toFixed(1) : 0;
                             })()}
                           </p>
                         </div>
@@ -3016,8 +3072,8 @@ Please provide insights that are specific, actionable, and tailored to these met
                       <div>
                         <p className="text-sm text-gray-600 mb-1">Success Rate</p>
                         <p className="text-3xl font-bold text-green-600">
-                          {baseFilteredCalls.length > 0 
-                            ? ((baseFilteredCalls.filter(c => (c.outcome || '').toLowerCase() === 'completed').length / baseFilteredCalls.length) * 100).toFixed(1)
+                          {dateFilteredCalls.length > 0 
+                            ? ((dateFilteredCalls.filter(c => (c.outcome || '').toLowerCase() === 'completed').length / dateFilteredCalls.length) * 100).toFixed(1)
                             : 0}%
                         </p>
                       </div>
@@ -3058,8 +3114,8 @@ Please provide insights that are specific, actionable, and tailored to these met
                                 .map(a => a.recordings?.call_history_id)
                                 .filter(Boolean)
                             );
-                            // Count calls that have follow-up requirement
-                            return baseFilteredCalls.filter(c => followUpCallIds.has(c.id)).length;
+                            // Count calls that have follow-up requirement OR no-answer outcome
+                            return dateFilteredCalls.filter(c => followUpCallIds.has(c.id) || c.outcome === 'no-answer').length;
                           })()}
                         </p>
                       </div>
@@ -3541,6 +3597,38 @@ Please provide insights that are specific, actionable, and tailored to these met
                       <SelectItem value="month">Last 30 days</SelectItem>
                     </SelectContent>
                 </Select>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        "w-[200px] justify-start text-left font-normal",
+                        !selectedCallDate && "text-muted-foreground"
+                      )}
+                    >
+                      <Calendar className="mr-2 h-4 w-4" />
+                      {selectedCallDate ? format(selectedCallDate, "PPP") : "Pick a date"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <CalendarComponent
+                      mode="single"
+                      selected={selectedCallDate}
+                      onSelect={setSelectedCallDate}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+                {selectedCallDate && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedCallDate(undefined)}
+                    className="h-9 px-2"
+                  >
+                    Clear Date
+                  </Button>
+                )}
                 <Input
                   placeholder="Search leads, contact or agent"
                   value={callSearch}
@@ -3583,6 +3671,38 @@ Please provide insights that are specific, actionable, and tailored to these met
                     All ({visibleFilteredCalls.length})
                   </button>
                   <button
+                    onClick={() => setCallOutcomeFilter('relevant')}
+                    className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+                      callOutcomeFilter === 'relevant'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Relevant ({visibleFilteredCalls.filter(c => {
+                      const outcome = (c.outcome || '').toLowerCase();
+                      const isFailed = outcome === 'failed';
+                      const isNoAnswer = outcome === 'no-answer';
+                      const isBusy = outcome === 'busy';
+                      return (c.exotel_duration || 0) > 30 && !isFailed && !isNoAnswer && !isBusy;
+                    }).length})
+                  </button>
+                  <button
+                    onClick={() => setCallOutcomeFilter('irrelevant')}
+                    className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+                      callOutcomeFilter === 'irrelevant'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Irrelevant ({visibleFilteredCalls.filter(c => {
+                      const outcome = (c.outcome || '').toLowerCase();
+                      const isFailed = outcome === 'failed';
+                      const isNoAnswer = outcome === 'no-answer';
+                      const isBusy = outcome === 'busy';
+                      return (c.exotel_duration || 0) <= 30 && !isFailed && !isNoAnswer && !isBusy;
+                    }).length})
+                  </button>
+                  <button
                     onClick={() => setCallOutcomeFilter('followup')}
                     className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
                       callOutcomeFilter === 'followup'
@@ -3602,8 +3722,18 @@ Please provide insights that are specific, actionable, and tailored to these met
                           .map(a => a.recordings?.call_history_id)
                           .filter(Boolean)
                       );
-                      return visibleFilteredCalls.filter(c => followUpCallIds.has(c.id)).length;
+                      return visibleFilteredCalls.filter(c => followUpCallIds.has(c.id) || c.outcome === 'no-answer').length;
                     })()})
+                  </button>
+                  <button
+                    onClick={() => setCallOutcomeFilter('busy')}
+                    className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+                      callOutcomeFilter === 'busy'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Busy ({visibleFilteredCalls.filter(c => (c.outcome || '').toLowerCase() === 'busy').length})
                   </button>
                   <button
                     onClick={() => setCallOutcomeFilter('Failed')}
@@ -3694,12 +3824,24 @@ Please provide insights that are specific, actionable, and tailored to these met
                               {call.leads?.contact || 'N/A'}
                             </TableCell>
                             <TableCell className="text-gray-600">
-                              <div>{new Date(call.created_at).toLocaleDateString('en-GB')}</div>
+                              <div>
+                                {(() => {
+                                  const dateStr = call.call_date || call.created_at;
+                                  if (!dateStr) return 'N/A';
+                                  // Extract date: YYYY-MM-DD from timestamp
+                                  const datePart = dateStr.substring(0, 10);
+                                  const [year, month, day] = datePart.split('-');
+                                  return `${day}-${month}-${year.substring(2)}`;
+                                })()}
+                              </div>
                               <div className="text-sm text-gray-500">
-                                {new Date(call.created_at).toLocaleTimeString('en-GB', { 
-                                  hour: '2-digit', 
-                                  minute: '2-digit' 
-                                })}
+                                {(() => {
+                                  const dateStr = call.call_date || call.created_at;
+                                  if (!dateStr) return '--';
+                                  // Extract time: HH:MM from timestamp
+                                  const timePart = dateStr.substring(11, 16);
+                                  return timePart;
+                                })()}
                               </div>
                             </TableCell>
                             <TableCell className="text-gray-600">

@@ -1,10 +1,14 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
+import { formatNumber, cn } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import { format } from "date-fns";
 import { 
   Users, 
   Phone, 
@@ -16,7 +20,8 @@ import {
   Award,
   Activity,
   ThumbsUp,
-  MessageSquare
+  MessageSquare,
+  Calendar
 } from "lucide-react";
 
 interface Employee {
@@ -31,6 +36,7 @@ export default function ManagerReportsPage() {
   const [loading, setLoading] = useState(true);
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'this_week' | 'this_month' | 'custom'>('this_month');
   const [customDateRange, setCustomDateRange] = useState({ startDate: '', endDate: '' });
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [employeeStats, setEmployeeStats] = useState<Map<string, any>>(new Map());
   const [teamOverview, setTeamOverview] = useState<any>(null);
@@ -39,53 +45,54 @@ export default function ManagerReportsPage() {
     if (userRole?.company_id) {
       fetchReportData();
     }
-  }, [userRole, dateFilter, customDateRange]);
+  }, [userRole, dateFilter, customDateRange, selectedDate]);
 
   const getDateRange = () => {
     const now = new Date();
     let startDateStr: string;
     let endDateStr: string;
 
-    const formatDateToISO = (date: Date, isEndOfDay: boolean = false) => {
+    // Format date as YYYY-MM-DD (simple date format for call_date comparison)
+    const formatDateStr = (date: Date) => {
       const year = date.getFullYear();
       const month = String(date.getMonth() + 1).padStart(2, '0');
       const day = String(date.getDate()).padStart(2, '0');
-      
-      if (isEndOfDay) {
-        return `${year}-${month}-${day}T23:59:59.999Z`;
-      } else {
-        return `${year}-${month}-${day}T00:00:00.000Z`;
-      }
+      return `${year}-${month}-${day}`;
     };
 
-    if (dateFilter === 'today') {
-      startDateStr = formatDateToISO(now, false);
-      endDateStr = formatDateToISO(now, true);
+    // If a specific date is selected, use that
+    if (selectedDate) {
+      startDateStr = formatDateStr(selectedDate);
+      endDateStr = formatDateStr(selectedDate);
+    } else if (dateFilter === 'today') {
+      startDateStr = formatDateStr(now);
+      endDateStr = formatDateStr(now);
     } else if (dateFilter === 'yesterday') {
       const yesterday = new Date();
       yesterday.setDate(now.getDate() - 1);
-      startDateStr = formatDateToISO(yesterday, false);
-      endDateStr = formatDateToISO(yesterday, true);
+      startDateStr = formatDateStr(yesterday);
+      endDateStr = formatDateStr(yesterday);
     } else if (dateFilter === 'this_week') {
-      const weekAgo = new Date();
-      weekAgo.setDate(now.getDate() - 7);
-      startDateStr = formatDateToISO(weekAgo, false);
-      endDateStr = formatDateToISO(now, true);
+      // Last 7 days including today
+      const weekAgo = new Date(now);
+      weekAgo.setDate(now.getDate() - 6);
+      startDateStr = formatDateStr(weekAgo);
+      endDateStr = formatDateStr(now);
     } else if (dateFilter === 'this_month') {
-      const monthAgo = new Date();
-      monthAgo.setDate(now.getDate() - 30);
-      startDateStr = formatDateToISO(monthAgo, false);
-      endDateStr = formatDateToISO(now, true);
+      // First day of current month to last day of current month
+      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      startDateStr = formatDateStr(firstDayOfMonth);
+      const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      endDateStr = formatDateStr(lastDayOfMonth);
     } else if (dateFilter === 'custom' && customDateRange.startDate && customDateRange.endDate) {
-      const startDate = new Date(customDateRange.startDate);
-      const endDate = new Date(customDateRange.endDate);
-      startDateStr = formatDateToISO(startDate, false);
-      endDateStr = formatDateToISO(endDate, true);
+      startDateStr = customDateRange.startDate;
+      endDateStr = customDateRange.endDate;
     } else {
-      const monthAgo = new Date();
-      monthAgo.setDate(now.getDate() - 30);
-      startDateStr = formatDateToISO(monthAgo, false);
-      endDateStr = formatDateToISO(now, true);
+      // Default to this month
+      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      startDateStr = formatDateStr(firstDayOfMonth);
+      const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      endDateStr = formatDateStr(lastDayOfMonth);
     }
 
     return { startDate: startDateStr, endDate: endDateStr };
@@ -105,13 +112,14 @@ export default function ManagerReportsPage() {
       console.log('Fetching report data for company_id:', userRole.company_id);
       console.log('Manager user_id:', userRole.user_id);
       console.log('Date Filter:', dateFilter);
+      console.log('Selected Date:', selectedDate);
       console.log('Custom Date Range:', customDateRange);
-      console.log('Date range:', { 
+      console.log('Date range CALCULATED:', { 
         startDate, 
         endDate,
-        startDateLocal: new Date(startDate).toLocaleString(),
-        endDateLocal: new Date(endDate).toLocaleString()
+        filterType: dateFilter
       });
+      console.log('Start Date:', startDate, '| End Date:', endDate);
 
       // Get manager's data
       const { data: managerData, error: managerError } = await supabase
@@ -163,48 +171,120 @@ export default function ManagerReportsPage() {
       console.log('End Date:', endDate);
       console.log('Employee IDs:', employeeIds);
       
-      const { data: callsData, error: callsError } = await supabase
-        .from('call_history')
-        .select('*')
-        .in('employee_id', employeeIds)
-        .gte('call_date', startDate)
-        .lte('call_date', endDate);
+      // Fetch all calls for employees using pagination (Supabase has 1000 row limit per request)
+      let allCallsData: any[] = [];
+      let from = 0;
+      const batchSize = 1000;
+      let hasMore = true;
       
-      console.log('Calls returned:', callsData?.length || 0);
-      if (callsData && callsData.length > 0) {
-        console.log('Sample call:', callsData[0]);
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('call_history')
+          .select('*')
+          .in('employee_id', employeeIds)
+          .range(from, from + batchSize - 1);
+        
+        if (error) {
+          console.error('Error fetching calls batch:', error);
+          break;
+        }
+        
+        if (data && data.length > 0) {
+          allCallsData = [...allCallsData, ...data];
+          from += batchSize;
+          hasMore = data.length === batchSize;
+        } else {
+          hasMore = false;
+        }
       }
-      console.log('Query error:', callsError);
 
-      if (callsError) {
-        console.error('Error fetching calls:', callsError);
-        throw callsError;
-      }
+      // Helper to extract YYYY-MM-DD from any date string
+      const extractDateStr = (dateString: string): string => {
+        if (!dateString) return '';
+        return dateString.substring(0, 10); // Take first 10 chars: YYYY-MM-DD
+      };
+
+      // Filter calls by date range (using call_date or fallback to created_at)
+      const callsData = (allCallsData || []).filter(call => {
+        const dateToUse = call.call_date || call.created_at;
+        if (!dateToUse) return false;
+        const callDateStr = extractDateStr(dateToUse);
+        const isInRange = callDateStr >= startDate && callDateStr <= endDate;
+        return isInRange;
+      });
       
-      console.log('Calls fetched:', callsData?.length || 0);
-      console.log('Call details:', callsData?.map(c => ({
-        id: c.id,
-        employee_id: c.employee_id,
-        outcome: c.outcome,
-        created_at: c.created_at,
-        created_at_local: new Date(c.created_at).toLocaleString()
-      })));
+      console.log('All calls fetched:', allCallsData?.length || 0);
+      console.log('Date range filter:', startDate, 'to', endDate);
+      console.log('Calls after date filter:', callsData?.length || 0);
+      if (allCallsData && allCallsData.length > 0) {
+        console.log('First call sample:', {
+          call_date: allCallsData[0].call_date,
+          extracted: extractDateStr(allCallsData[0].call_date || allCallsData[0].created_at || ''),
+          inRange: allCallsData[0].call_date ? 
+            (extractDateStr(allCallsData[0].call_date) >= startDate && extractDateStr(allCallsData[0].call_date) <= endDate) : 
+            'no call_date'
+        });
+      }
 
-      // Fetch analyses for the period (simplified query without join)
+      // Fetch recordings for these calls to get recording_ids
       const callIds = (callsData || []).map(call => call.id);
-      const { data: analysesData, error: analysesError } = await supabase
-        .from('analyses')
-        .select('*')
-        .in('call_id', callIds);
+      let analysesData: any[] = [];
+      
+      // Only fetch analyses if there are calls to query
+      if (callIds.length > 0) {
+        // Batch the call IDs into chunks of 200 to avoid URL length limits
+        const batchSize = 200;
+        let allRecordings: any[] = [];
+        
+        for (let i = 0; i < callIds.length; i += batchSize) {
+          const batch = callIds.slice(i, i + batchSize);
+          const { data: recordingsData, error: recordingsError } = await supabase
+            .from('recordings')
+            .select('id, call_history_id')
+            .in('call_history_id', batch);
 
-      if (analysesError) {
-        console.error('Error fetching analyses:', analysesError);
-        throw analysesError;
+          if (recordingsError) {
+            console.error('Error fetching recordings batch:', recordingsError);
+          } else {
+            allRecordings = [...allRecordings, ...(recordingsData || [])];
+          }
+        }
+
+        const recordingIds = allRecordings.map(r => r.id);
+        console.log('Total recordings fetched:', allRecordings.length);
+        console.log('Total recording IDs:', recordingIds.length);
+        
+        // Then fetch analyses using recording_ids (also batched)
+        if (recordingIds.length > 0) {
+          let allAnalyses: any[] = [];
+          
+          for (let i = 0; i < recordingIds.length; i += batchSize) {
+            const batch = recordingIds.slice(i, i + batchSize);
+            const { data, error: analysesError } = await supabase
+              .from('analyses')
+              .select(`
+                *,
+                recordings (
+                  id,
+                  call_history_id
+                )
+              `)
+              .in('recording_id', batch);
+
+            if (analysesError) {
+              console.error('Error fetching analyses batch:', analysesError);
+            } else {
+              allAnalyses = [...allAnalyses, ...(data || [])];
+            }
+          }
+          
+          analysesData = allAnalyses;
+        }
       }
       
       console.log('Analyses fetched:', analysesData?.length || 0, analysesData);
       
-      // Create a map of call_id to employee_id for quick lookup
+      // Create a map of call_history_id to employee_id for quick lookup
       const callIdToEmployeeMap = new Map();
       callsData?.forEach(call => {
         callIdToEmployeeMap.set(call.id, call.employee_id);
@@ -214,9 +294,10 @@ export default function ManagerReportsPage() {
       const employeeStatsMap = new Map();
       employeesData?.forEach(employee => {
         const employeeCalls = callsData?.filter(call => call.employee_id === employee.user_id) || [];
-        // Match analyses by checking if the call_id belongs to this employee
+        // Match analyses by checking if the call_history_id belongs to this employee
         const employeeAnalyses = analysesData?.filter(analysis => {
-          const employeeId = callIdToEmployeeMap.get(analysis.call_id);
+          const callHistoryId = analysis.recordings?.call_history_id;
+          const employeeId = callIdToEmployeeMap.get(callHistoryId);
           return employeeId === employee.user_id;
         }) || [];
 
@@ -237,16 +318,34 @@ export default function ManagerReportsPage() {
           return `${mins}:${secs.toString().padStart(2, '0')}`;
         };
 
+        // Calculate no-answer and failed counts
+        const noAnswerCalls = employeeCalls.filter(c => c.outcome === 'no-answer').length;
+        const failedCalls = employeeCalls.filter(c => c.outcome === 'Failed' || c.outcome === 'failed').length;
+        const totalCallsCount = employeeCalls.length;
+
+        const completedCallsCount = employeeCalls.filter(c => c.outcome === 'completed' || c.outcome === 'converted').length;
+        const relevantCallsCount = employeeCalls.filter(c => (c.exotel_duration || 0) >= 30).length;
+        const irrelevantCallsCount = employeeCalls.filter(c => (c.exotel_duration || 0) < 30).length;
+        const analyzedCount = completedAnalyses.length;
+
         employeeStatsMap.set(employee.id, {
-          total_calls: employeeCalls.length,
-          completed_calls: employeeCalls.filter(c => c.outcome === 'completed' || c.outcome === 'converted').length,
-          total_relevant: employeeCalls.filter(c => (c.exotel_duration || 0) >= 30).length,
-          total_irrelevant: employeeCalls.filter(c => (c.exotel_duration || 0) < 30).length,
-          total_analyzed: completedAnalyses.length,
+          total_calls: totalCallsCount,
+          completed_calls: completedCallsCount,
+          completed_percent: totalCallsCount > 0 ? ((completedCallsCount / totalCallsCount) * 100).toFixed(1) : '0',
+          total_relevant: relevantCallsCount,
+          relevant_percent: totalCallsCount > 0 ? ((relevantCallsCount / totalCallsCount) * 100).toFixed(1) : '0',
+          total_irrelevant: irrelevantCallsCount,
+          irrelevant_percent: totalCallsCount > 0 ? ((irrelevantCallsCount / totalCallsCount) * 100).toFixed(1) : '0',
+          no_answer_calls: noAnswerCalls,
+          no_answer_percent: totalCallsCount > 0 ? ((noAnswerCalls / totalCallsCount) * 100).toFixed(1) : '0',
+          failed_calls: failedCalls,
+          failed_percent: totalCallsCount > 0 ? ((failedCalls / totalCallsCount) * 100).toFixed(1) : '0',
+          total_analyzed: analyzedCount,
+          analyzed_percent: totalCallsCount > 0 ? ((analyzedCount / totalCallsCount) * 100).toFixed(1) : '0',
           avg_talk_time: formatTime(avgTalkTimeSeconds),
           total_talk_time: formatTime(totalTalkTimeSeconds),
-          success_rate: employeeCalls.length > 0 ? 
-            ((employeeCalls.filter(c => c.outcome === 'completed' || c.outcome === 'converted').length / employeeCalls.length) * 100).toFixed(1) : 0,
+          success_rate: totalCallsCount > 0 ? 
+            ((completedCallsCount / totalCallsCount) * 100).toFixed(1) : 0,
           avg_call_quality: completedAnalyses.length > 0 ?
             (completedAnalyses.reduce((sum, a) => sum + (parseFloat(a.call_quality_score) || 0), 0) / completedAnalyses.length).toFixed(1) : 0,
           avg_closure_probability: completedAnalyses.length > 0 ?
@@ -270,6 +369,8 @@ export default function ManagerReportsPage() {
       // Team overview
       const totalCalls = callsData?.length || 0;
       const completedCalls = callsData?.filter(c => c.outcome === 'completed' || c.outcome === 'converted').length || 0;
+      const noAnswerCallsTotal = callsData?.filter(c => c.outcome === 'no-answer').length || 0;
+      const failedCallsTotal = callsData?.filter(c => c.outcome === 'Failed' || c.outcome === 'failed').length || 0;
       const allCompletedAnalyses = analysesData?.filter(a => a.status?.toLowerCase() === 'completed') || [];
 
       console.log('Total calls in period:', totalCalls);
@@ -282,6 +383,10 @@ export default function ManagerReportsPage() {
         total_calls: totalCalls,
         completed_calls: completedCalls,
         success_rate: totalCalls > 0 ? ((completedCalls / totalCalls) * 100).toFixed(1) : 0,
+        no_answer_calls: noAnswerCallsTotal,
+        no_answer_percent: totalCalls > 0 ? ((noAnswerCallsTotal / totalCalls) * 100).toFixed(1) : 0,
+        failed_calls: failedCallsTotal,
+        failed_percent: totalCalls > 0 ? ((failedCallsTotal / totalCalls) * 100).toFixed(1) : 0,
         avg_call_quality: allCompletedAnalyses.length > 0 ?
           (allCompletedAnalyses.reduce((sum, a) => sum + (parseFloat(a.call_quality_score) || 0), 0) / allCompletedAnalyses.length).toFixed(1) : 0,
         avg_script_adherence: allCompletedAnalyses.length > 0 ?
@@ -373,6 +478,41 @@ export default function ManagerReportsPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="flex-1">
+                <label className="text-sm font-medium mb-2 block">Or Pick a Date</label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !selectedDate && "text-muted-foreground"
+                      )}
+                    >
+                      <Calendar className="mr-2 h-4 w-4" />
+                      {selectedDate ? format(selectedDate, "PPP") : "Pick a date"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <CalendarComponent
+                      mode="single"
+                      selected={selectedDate}
+                      onSelect={setSelectedDate}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+                {selectedDate && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedDate(undefined)}
+                    className="mt-2 h-8 px-2"
+                  >
+                    Clear Date
+                  </Button>
+                )}
+              </div>
             </div>
             {dateFilter === 'custom' && (
               <div className="flex items-center gap-4">
@@ -403,14 +543,14 @@ export default function ManagerReportsPage() {
       </Card>
 
       {/* Team Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Team Size</CardTitle>
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{teamOverview?.total_employees || 0}</div>
+            <div className="text-2xl font-bold">{formatNumber(teamOverview?.total_employees || 0)}</div>
             <p className="text-xs text-muted-foreground">Active employees</p>
           </CardContent>
         </Card>
@@ -421,9 +561,35 @@ export default function ManagerReportsPage() {
             <Phone className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{teamOverview?.total_calls || 0}</div>
+            <div className="text-2xl font-bold">{formatNumber(teamOverview?.total_calls || 0)}</div>
             <p className="text-xs text-green-600 font-medium">
-              {teamOverview?.completed_calls || 0} completed
+              {formatNumber(teamOverview?.completed_calls || 0)} completed ({teamOverview?.success_rate || 0}%)
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-yellow-50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">No Answer<br/><span className="text-xs font-normal">(Follow-up)</span></CardTitle>
+            <Phone className="h-4 w-4 text-yellow-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-yellow-600">{formatNumber(teamOverview?.no_answer_calls || 0)}</div>
+            <p className="text-xs text-yellow-600 font-medium">
+              {teamOverview?.no_answer_percent || 0}% of total calls
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-red-50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Failed Calls</CardTitle>
+            <Phone className="h-4 w-4 text-red-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">{formatNumber(teamOverview?.failed_calls || 0)}</div>
+            <p className="text-xs text-red-600 font-medium">
+              {teamOverview?.failed_percent || 0}% of total calls
             </p>
           </CardContent>
         </Card>
@@ -445,7 +611,7 @@ export default function ManagerReportsPage() {
             <BarChart3 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{teamOverview?.total_analyses || 0}</div>
+            <div className="text-2xl font-bold">{formatNumber(teamOverview?.total_analyses || 0)}</div>
           </CardContent>
         </Card>
       </div>
@@ -486,11 +652,18 @@ export default function ManagerReportsPage() {
             <Activity className="h-5 w-5" />
             Employee Performance Details
           </CardTitle>
-          <CardDescription>Comprehensive performance metrics for each team member</CardDescription>
+          <CardDescription>Comprehensive performance metrics for each team member (sorted by calls)</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {employees.filter(e => e.is_active === true).map(employee => {
+            {employees
+              .filter(e => e.is_active === true)
+              .sort((a, b) => {
+                const statsA = employeeStats.get(a.id);
+                const statsB = employeeStats.get(b.id);
+                return (statsB?.total_calls || 0) - (statsA?.total_calls || 0);
+              })
+              .map((employee, index) => {
               const stats = employeeStats.get(employee.id);
               const performanceScore = parseFloat(stats?.success_rate || '0');
               
@@ -499,8 +672,8 @@ export default function ManagerReportsPage() {
                   {/* Employee Header */}
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                        <User className="h-5 w-5 text-blue-600" />
+                      <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center font-bold text-blue-600">
+                        {index + 1}
                       </div>
                       <div>
                         <h3 className="font-semibold">{employee.full_name}</h3>
@@ -515,26 +688,34 @@ export default function ManagerReportsPage() {
                   </div>
 
                   {/* Stats Grid */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-9 gap-3">
                     <div className="bg-blue-50 p-3 rounded-lg">
-                      <div className="text-xl font-bold text-blue-600">{stats?.total_calls || 0}</div>
+                      <div className="text-xl font-bold text-blue-600">{formatNumber(stats?.total_calls || 0)}</div>
                       <p className="text-xs text-blue-600 font-medium">Total Calls</p>
                     </div>
                     <div className="bg-green-50 p-3 rounded-lg">
-                      <div className="text-xl font-bold text-green-600">{stats?.completed_calls || 0}</div>
-                      <p className="text-xs text-green-600 font-medium">Completed</p>
+                      <div className="text-xl font-bold text-green-600">{formatNumber(stats?.completed_calls || 0)}</div>
+                      <p className="text-xs text-green-600 font-medium">Completed ({stats?.completed_percent || 0}%)</p>
                     </div>
                     <div className="bg-teal-50 p-3 rounded-lg">
-                      <div className="text-xl font-bold text-teal-600">{stats?.total_relevant || 0}</div>
-                      <p className="text-xs text-teal-600 font-medium">Total Relevant</p>
+                      <div className="text-xl font-bold text-teal-600">{formatNumber(stats?.total_relevant || 0)}</div>
+                      <p className="text-xs text-teal-600 font-medium">Relevant ({stats?.relevant_percent || 0}%)</p>
                     </div>
                     <div className="bg-orange-50 p-3 rounded-lg">
-                      <div className="text-xl font-bold text-orange-600">{stats?.total_irrelevant || 0}</div>
-                      <p className="text-xs text-orange-600 font-medium">Total Irrelevant</p>
+                      <div className="text-xl font-bold text-orange-600">{formatNumber(stats?.total_irrelevant || 0)}</div>
+                      <p className="text-xs text-orange-600 font-medium">Irrelevant ({stats?.irrelevant_percent || 0}%)</p>
+                    </div>
+                    <div className="bg-yellow-50 p-3 rounded-lg">
+                      <div className="text-xl font-bold text-yellow-600">{formatNumber(stats?.no_answer_calls || 0)}</div>
+                      <p className="text-xs text-yellow-600 font-medium">No Answer ({stats?.no_answer_percent || 0}%)</p>
+                    </div>
+                    <div className="bg-red-50 p-3 rounded-lg">
+                      <div className="text-xl font-bold text-red-600">{formatNumber(stats?.failed_calls || 0)}</div>
+                      <p className="text-xs text-red-600 font-medium">Failed ({stats?.failed_percent || 0}%)</p>
                     </div>
                     <div className="bg-indigo-50 p-3 rounded-lg">
-                      <div className="text-xl font-bold text-indigo-600">{stats?.total_analyzed || 0}</div>
-                      <p className="text-xs text-indigo-600 font-medium">Total Analyzed</p>
+                      <div className="text-xl font-bold text-indigo-600">{formatNumber(stats?.total_analyzed || 0)}</div>
+                      <p className="text-xs text-indigo-600 font-medium">Analyzed ({stats?.analyzed_percent || 0}%)</p>
                     </div>
                     <div className="bg-cyan-50 p-3 rounded-lg">
                       <div className="text-xl font-bold text-cyan-600">{stats?.avg_talk_time || '0:00'}</div>

@@ -559,6 +559,7 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
                     <Input
                       id="current_password"
                       type="password"
+                      autoComplete="off"
                       value={passwordData.current_password}
                       onChange={(e) => setPasswordData(prev => ({ ...prev, current_password: e.target.value }))}
                       placeholder="Enter current password"
@@ -569,6 +570,7 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
                     <Input
                       id="new_password"
                       type="password"
+                      autoComplete="new-password"
                       value={passwordData.new_password}
                       onChange={(e) => setPasswordData(prev => ({ ...prev, new_password: e.target.value }))}
                       placeholder="Enter new password"
@@ -579,6 +581,7 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
                     <Input
                       id="confirm_password"
                       type="password"
+                      autoComplete="new-password"
                       value={passwordData.confirm_password}
                       onChange={(e) => setPasswordData(prev => ({ ...prev, confirm_password: e.target.value }))}
                       placeholder="Confirm new password"

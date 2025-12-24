@@ -2883,7 +2883,7 @@ export default function AdminDashboard() {
                     <Users className="h-5 w-5 text-blue-500" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-3xl font-bold">{formatNumber(managers.length)}</div>
+                    <div className="text-xl sm:text-2xl md:text-3xl font-bold whitespace-nowrap">{formatNumber(managers.length)}</div>
                   </CardContent>
                 </Card>
 
@@ -2893,7 +2893,7 @@ export default function AdminDashboard() {
                     <UserPlus className="h-5 w-5 text-red-500" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-3xl font-bold">{formatNumber(employees.length)}</div>
+                    <div className="text-xl sm:text-2xl md:text-3xl font-bold whitespace-nowrap">{formatNumber(employees.length)}</div>
                   </CardContent>
                 </Card>
 
@@ -2903,7 +2903,7 @@ export default function AdminDashboard() {
                     <Phone className="h-5 w-5 text-pink-500" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-3xl font-bold">{formatNumber(leads.length)}</div>
+                    <div className="text-xl sm:text-2xl md:text-3xl font-bold whitespace-nowrap">{formatNumber(leads.length)}</div>
                   </CardContent>
                 </Card>
 
@@ -2913,7 +2913,7 @@ export default function AdminDashboard() {
                     <PhoneCall className="h-5 w-5 text-violet-500" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-3xl font-bold">{formatNumber(dateFilteredCalls.length)}</div>
+                    <div className="text-xl sm:text-2xl md:text-3xl font-bold whitespace-nowrap">{formatNumber(dateFilteredCalls.length)}</div>
                     <div className="flex items-center mt-1">
                       <TrendingUp className="h-3 w-3 text-green-500 mr-1" />
                       <span className="text-xs font-medium text-green-500">Good</span>
@@ -2930,7 +2930,7 @@ export default function AdminDashboard() {
                     <CheckCircle className="h-5 w-5 text-green-600" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold text-green-700">
+                    <div className="text-xl md:text-2xl font-bold text-green-700 break-words">
                       {dateFilteredCalls.length > 0
                         ? Math.round((dateFilteredAnalyses.filter(a => (a.closure_probability || 0) >= 70).length / dateFilteredAnalyses.length) * 100) || 0
                         : 0}%
@@ -2945,7 +2945,7 @@ export default function AdminDashboard() {
                     <Clock className="h-5 w-5 text-purple-600" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold text-purple-700">
+                    <div className="text-xl md:text-2xl font-bold text-purple-700 break-words">
                       {(() => {
                         const relevantCalls = dateFilteredCalls.filter(c => (c.exotel_duration || 0) >= 30);
                         if (relevantCalls.length > 0) {
@@ -2968,7 +2968,7 @@ export default function AdminDashboard() {
                     <Building className="h-5 w-5 text-orange-600" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold text-orange-700">{formatNumber(clients?.length || 0)}</div>
+                    <div className="text-xl md:text-2xl font-bold text-orange-700 break-words">{formatNumber(clients?.length || 0)}</div>
                     <p className="text-xs text-gray-600 mt-1">Organizations served</p>
                   </CardContent>
                 </Card>
@@ -2979,7 +2979,7 @@ export default function AdminDashboard() {
                     <Briefcase className="h-5 w-5 text-cyan-600" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold text-cyan-700">{formatNumber(jobs?.length || 0)}</div>
+                    <div className="text-xl md:text-2xl font-bold text-cyan-700 break-words">{formatNumber(jobs?.length || 0)}</div>
                     <p className="text-xs text-gray-600 mt-1">Job postings</p>
                   </CardContent>
                 </Card>
@@ -2990,7 +2990,7 @@ export default function AdminDashboard() {
                     <Users className="h-5 w-5 text-yellow-600" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold text-yellow-700">{formatNumber(leadGroups.length)}</div>
+                    <div className="text-xl md:text-2xl font-bold text-yellow-700 break-words">{formatNumber(leadGroups.length)}</div>
                     <p className="text-xs text-gray-600 mt-1">Organized groups</p>
                   </CardContent>
                 </Card>
@@ -3324,40 +3324,56 @@ export default function AdminDashboard() {
                       }} className="h-[280px]">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={(() => {
+                            // Helper: get local date string YYYY-MM-DD
+                            const getLocalDateStr = (date: Date) => {
+                              const year = date.getFullYear();
+                              const month = String(date.getMonth() + 1).padStart(2, '0');
+                              const day = String(date.getDate()).padStart(2, '0');
+                              return `${year}-${month}-${day}`;
+                            };
+
+                            // Helper: extract YYYY-MM-DD from any date string (avoids timezone conversion issues)
+                            const extractDateStr = (dateString: string): string => {
+                              if (!dateString) return '';
+                              return dateString.substring(0, 10); // Just take first 10 chars: YYYY-MM-DD
+                            };
+
                             // Always show last 7 days regardless of filter
                             const today = new Date();
-                            today.setHours(23, 59, 59, 999);
+                            const todayStr = getLocalDateStr(today);
                             const sevenDaysAgo = new Date(today);
                             sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
-                            sevenDaysAgo.setHours(0, 0, 0, 0);
+                            const sevenDaysAgoStr = getLocalDateStr(sevenDaysAgo);
                             
                             // Initialize all 7 days with 0 values
                             const dateMap = new Map<string, { calls: number; profiles: number; dateObj: Date }>();
                             for (let i = 0; i < 7; i++) {
                               const date = new Date(sevenDaysAgo);
                               date.setDate(date.getDate() + i);
-                              const dateKey = date.toISOString().split('T')[0];
+                              const dateKey = getLocalDateStr(date);
                               dateMap.set(dateKey, { calls: 0, profiles: 0, dateObj: new Date(date) });
                             }
                             
                             // Process ALL calls (not filtered) within last 7 days
+                            // Use string comparison to avoid timezone issues
                             (calls || []).forEach(c => {
-                              const callDate = new Date(c.call_date || c.created_at);
-                              if (callDate >= sevenDaysAgo && callDate <= today) {
-                                const dateKey = callDate.toISOString().split('T')[0];
-                                if (dateMap.has(dateKey)) {
-                                  dateMap.get(dateKey)!.calls++;
+                              const dateToUse = c.call_date || c.created_at;
+                              if (!dateToUse) return;
+                              const callDateStr = extractDateStr(dateToUse);
+                              if (callDateStr >= sevenDaysAgoStr && callDateStr <= todayStr) {
+                                if (dateMap.has(callDateStr)) {
+                                  dateMap.get(callDateStr)!.calls++;
                                 }
                               }
                             });
                             
                             // Process ALL profile downloads within last 7 days
                             (dailyProductivity || []).forEach(p => {
-                              const prodDate = new Date(p.date);
-                              if (prodDate >= sevenDaysAgo && prodDate <= today) {
-                                const dateKey = prodDate.toISOString().split('T')[0];
-                                if (dateMap.has(dateKey)) {
-                                  dateMap.get(dateKey)!.profiles += (p.profiles_downloaded || 0);
+                              if (!p.date) return;
+                              const prodDateStr = extractDateStr(p.date);
+                              if (prodDateStr >= sevenDaysAgoStr && prodDateStr <= todayStr) {
+                                if (dateMap.has(prodDateStr)) {
+                                  dateMap.get(prodDateStr)!.profiles += (p.profiles_downloaded || 0);
                                 }
                               }
                             });
@@ -3507,36 +3523,63 @@ export default function AdminDashboard() {
               {/* Top Performers - Full Width */}
               <Card className="bg-white shadow-sm">
                 <CardHeader>
-                  <CardTitle className="text-base font-semibold">Top Performers This Month</CardTitle>
+                  <CardTitle className="text-base font-semibold">
+                    Top Performers - {dateFilter === 'today' ? 'Today' : dateFilter === 'yesterday' ? 'Yesterday' : dateFilter === 'week' ? 'Last 7 Days' : dateFilter === 'month' ? 'This Month' : 'Custom Range'}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-5 gap-4">
-                    {employees.slice(0, 5).map((employee, index) => {
-                      const employeeCalls = dateFilteredCalls.filter(c => c.employee_id === employee.user_id);
-                      const employeeAnalyses = dateFilteredAnalyses.filter(a => a.user_id === employee.user_id);
-                      const avgClosure = employeeAnalyses.length > 0
-                        ? Math.round(employeeAnalyses.reduce((sum, a) => sum + (a.closure_probability || 0), 0) / employeeAnalyses.length)
-                        : 0;
-                      const manager = managers.find(m => m.id === employee.manager_id);
+                    {(() => {
+                      // Calculate calls and avg talk time per employee
+                      const employeeStats = employees.map(employee => {
+                        const employeeCalls = dateFilteredCalls.filter(c => c.employee_id === employee.user_id);
+                        const callCount = employeeCalls.length;
+                        
+                        // Calculate average talk time (exotel_duration is in seconds)
+                        const totalTalkTime = employeeCalls.reduce((sum, c) => sum + (c.exotel_duration || 0), 0);
+                        const avgTalkTime = callCount > 0 ? Math.round(totalTalkTime / callCount) : 0;
+                        
+                        return {
+                          employee,
+                          callCount,
+                          avgTalkTime
+                        };
+                      });
 
-                      return (
-                        <div key={employee.id} className="p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg hover:shadow-md transition-all">
-                          <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-500 text-white font-bold text-lg mb-3 mx-auto">
-                            {index + 1}
-                          </div>
-                          <div className="text-center">
-                            <p className="font-semibold text-sm mb-1 truncate">{employee.profile?.full_name || employee.email}</p>
-                            <p className="text-xs text-gray-600 mb-3 truncate">Under {manager?.profile?.full_name || 'N/A'}</p>
-                            <div className="pt-3 border-t border-blue-200">
-                              <p className="text-2xl font-bold text-blue-600 mb-1">{employeeCalls.length}</p>
-                              <p className="text-xs text-gray-500 mb-2">Total Calls</p>
-                              <p className="text-lg font-semibold text-green-600">{avgClosure}%</p>
-                              <p className="text-xs text-gray-500">Avg Closure</p>
+                      // Sort by call count (descending) and take top 5
+                      const topPerformers = employeeStats
+                        .sort((a, b) => b.callCount - a.callCount)
+                        .slice(0, 5);
+
+                      // Format seconds to mm:ss
+                      const formatDuration = (seconds: number) => {
+                        const mins = Math.floor(seconds / 60);
+                        const secs = seconds % 60;
+                        return `${mins}:${secs.toString().padStart(2, '0')}`;
+                      };
+
+                      return topPerformers.map(({ employee, callCount, avgTalkTime }, index) => {
+                        const manager = managers.find(m => m.id === employee.manager_id);
+
+                        return (
+                          <div key={employee.id} className="p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg hover:shadow-md transition-all">
+                            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-500 text-white font-bold text-lg mb-3 mx-auto">
+                              {index + 1}
+                            </div>
+                            <div className="text-center">
+                              <p className="font-semibold text-sm mb-1 truncate">{employee.profile?.full_name || employee.email}</p>
+                              <p className="text-xs text-gray-600 mb-3 truncate">Under {manager?.profile?.full_name || 'N/A'}</p>
+                              <div className="pt-3 border-t border-blue-200">
+                                <p className="text-2xl font-bold text-blue-600 mb-1">{callCount}</p>
+                                <p className="text-xs text-gray-500 mb-2">Total Calls</p>
+                                <p className="text-lg font-semibold text-green-600">{formatDuration(avgTalkTime)}</p>
+                                <p className="text-xs text-gray-500">Avg Talk Time</p>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      });
+                    })()}
                   </div>
                 </CardContent>
               </Card>
@@ -5708,6 +5751,7 @@ export default function AdminDashboard() {
                       <Input
                         id="new_password"
                         type="password"
+                        autoComplete="new-password"
                         value={passwordData.new_password}
                         onChange={(e) => setPasswordData(prev => ({ ...prev, new_password: e.target.value }))}
                         placeholder="Enter new password (min 6 characters)"
@@ -5722,6 +5766,7 @@ export default function AdminDashboard() {
                       <Input
                         id="confirm_password"
                         type="password"
+                        autoComplete="new-password"
                         value={passwordData.confirm_password}
                         onChange={(e) => setPasswordData(prev => ({ ...prev, confirm_password: e.target.value }))}
                         placeholder="Confirm new password"

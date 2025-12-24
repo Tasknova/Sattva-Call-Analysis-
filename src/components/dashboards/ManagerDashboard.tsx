@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { formatNumber } from "@/lib/utils";
+import { format } from "date-fns";
 import { useSessionTimeout } from "@/hooks/useSessionTimeout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -48,13 +51,13 @@ import {
   MoreHorizontal,
   Edit,
   Trash2,
+  Calendar,
   Eye,
   EyeOff,
   Copy,
   Check,
   Building,
   AlertTriangle,
-  Calendar,
   Briefcase,
   Filter,
   CheckCircle2
@@ -189,6 +192,7 @@ export default function ManagerDashboard() {
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
   const [callDateFilter, setCallDateFilter] = useState<string>('all');
+  const [selectedCallDate, setSelectedCallDate] = useState<Date | undefined>(undefined);
   const [callOutcomeFilter, setCallOutcomeFilter] = useState<string>('all');
   const [callSearch, setCallSearch] = useState<string>('');
   const [callSortBy, setCallSortBy] = useState<'date' | 'duration' | 'agent'>('date');
@@ -203,6 +207,7 @@ export default function ManagerDashboard() {
   // Pagination state
   const [callHistoryPage, setCallHistoryPage] = useState(1);
   const [leadsPage, setLeadsPage] = useState(1);
+  const [analysisPage, setAnalysisPage] = useState(1);
   const ITEMS_PER_PAGE = 50;
   const [teamPerfEmployeeFilter, setTeamPerfEmployeeFilter] = useState<string>('all');
   const [teamPerfSortBy, setTeamPerfSortBy] = useState<'name' | 'totalCalls' | 'relevantCalls' | 'irrelevantCalls' | 'contacted' | 'notAnswered' | 'failed' | 'busy' | 'duration' | 'avgTime'>('name');
@@ -295,11 +300,12 @@ export default function ManagerDashboard() {
       }
       
       case 'month': {
-        // Last 30 days including today
-        const monthAgo = new Date(now);
-        monthAgo.setDate(monthAgo.getDate() - 29);
-        const monthAgoStr = getLocalDateStr(monthAgo);
-        return callDateStr >= monthAgoStr && callDateStr <= todayStr;
+        // First day of current month to last day of current month
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const monthStartStr = getLocalDateStr(monthStart);
+        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        const monthEndStr = getLocalDateStr(monthEnd);
+        return callDateStr >= monthStartStr && callDateStr <= monthEndStr;
       }
       
       case 'custom':
@@ -414,6 +420,13 @@ export default function ManagerDashboard() {
       const callDate = new Date(call.call_date || call.created_at || '');
       if (Number.isNaN(callDate.getTime())) return false;
 
+      // If a specific date is selected, filter by that date only
+      if (selectedCallDate) {
+        const selectedDateStr = format(selectedCallDate, 'yyyy-MM-dd');
+        const callDateStr = format(callDate, 'yyyy-MM-dd');
+        return callDateStr === selectedDateStr;
+      }
+
       if (callDateFilter === 'today') {
         const todayStr = now.toISOString().split('T')[0];
         return (new Date(callDate).toISOString().split('T')[0]) === todayStr;
@@ -421,27 +434,26 @@ export default function ManagerDashboard() {
         const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).toISOString().split('T')[0];
         return (new Date(callDate).toISOString().split('T')[0]) === y;
       } else if (callDateFilter === 'week') {
-        const dayOfWeek = now.getDay();
-        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-        const weekStart = new Date(now);
-        weekStart.setDate(now.getDate() - daysFromMonday);
-        weekStart.setHours(0,0,0,0);
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 4);
-        weekEnd.setHours(23,59,59,999);
+        // Last 7 days including today
+        const sevenDaysAgo = new Date(now);
+        sevenDaysAgo.setDate(now.getDate() - 6);
+        sevenDaysAgo.setHours(0,0,0,0);
+        const today = new Date(now);
+        today.setHours(23,59,59,999);
         const t = new Date(callDate).getTime();
-        return t >= weekStart.getTime() && t <= weekEnd.getTime();
+        return t >= sevenDaysAgo.getTime() && t <= today.getTime();
       } else if (callDateFilter === 'month') {
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
         monthStart.setHours(0,0,0,0);
-        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        // Use today as end date, not end of month
+        const monthEnd = new Date(now);
         monthEnd.setHours(23,59,59,999);
         const t = new Date(callDate).getTime();
         return t >= monthStart.getTime() && t <= monthEnd.getTime();
       }
       return true;
     });
-  }, [calls, callDateFilter]);
+  }, [calls, callDateFilter, selectedCallDate]);
 
   // baseFilteredCalls: date-filtered by callDateFilter plus employee/search filters
   const baseFilteredCalls = useMemo(() => {
@@ -484,8 +496,9 @@ export default function ManagerDashboard() {
         return dateUTC >= weekAgoUTC && dateUTC <= nowUTC;
       
       case 'month':
-        const monthAgoUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 29);
-        return dateUTC >= monthAgoUTC && dateUTC <= nowUTC;
+        const monthStartUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+        const monthEndUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0);
+        return dateUTC >= monthStartUTC && dateUTC <= monthEndUTC;
       
       case 'custom':
         if (!teamPerfCustomStartDate || !teamPerfCustomEndDate) return true;
@@ -681,50 +694,68 @@ export default function ManagerDashboard() {
       }
 
       // Fetch analyses for recordings made by employees under this manager
-      let analysesData = [];
+      let analysesData: any[] = [];
       let analysesError = null;
       
       if (employeesData && employeesData.length > 0) {
         const employeeUserIds = employeesData.map(emp => emp.user_id);
         console.log('Manager Dashboard - Fetching analyses for employee user IDs:', employeeUserIds);
-        const { data, error } = await supabase
-          .from('analyses')
-          .select(`
-              <img 
-              src="/Sattva_logo.png" 
-              alt="Sattva" 
-              className="h-10 w-auto cursor-pointer hover:opacity-80 transition-opacity"
-              onError={(e) => {
-                e.currentTarget.src = "/Sattva_logo.png";
-              }}
-              onClick={() => navigate('/')}
-            />
-            recordings ( id, file_name, recording_url, status, call_history_id )
-          `)
-          .in('user_id', employeeUserIds);
-        analysesData = data;
-        analysesError = error;
+        
+        // Fetch all analyses using pagination
+        let from = 0;
+        const batchSize = 1000;
+        let hasMore = true;
+        
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from('analyses')
+            .select('*')
+            .in('user_id', employeeUserIds)
+            .range(from, from + batchSize - 1);
+          
+          if (error) {
+            analysesError = error;
+            break;
+          }
+          
+          if (data && data.length > 0) {
+            analysesData = [...analysesData, ...data];
+            from += batchSize;
+            hasMore = data.length === batchSize;
+          } else {
+            hasMore = false;
+          }
+        }
 
-        // Enrich analyses with call_history (and nested lead/employee info) by separate fetch
+        // Enrich analyses with call_history (and nested lead/employee info) using call_id
         if (!analysesError && analysesData && analysesData.length > 0) {
-          const callHistoryIds = Array.from(new Set(
-            analysesData.map((a: any) => a.recordings?.call_history_id).filter(Boolean)
+          const callIds = Array.from(new Set(
+            analysesData.map((a: any) => a.call_id).filter(Boolean)
           ));
 
-          if (callHistoryIds.length > 0) {
-            const { data: callsData, error: callsErr } = await supabase
-              .from('call_history')
-              .select('id, call_date, outcome, lead_id, employee_id, leads(name, email, contact), employees(full_name)')
-              .in('id', callHistoryIds as any[]);
-
-            const callHistoryMap = !callsErr && callsData ? Object.fromEntries(callsData.map((c: any) => [c.id, c])) : {};
-
-            analysesData = (analysesData as any[]).map((a: any) => ({
-              ...a,
-              recordings: {
-                ...a.recordings,
-                call_history: a.recordings?.call_history_id ? callHistoryMap[a.recordings.call_history_id] : undefined,
+          if (callIds.length > 0) {
+            // Fetch call_history data in batches
+            let allCallsData: any[] = [];
+            const callBatchSize = 200;
+            
+            for (let i = 0; i < callIds.length; i += callBatchSize) {
+              const batch = callIds.slice(i, i + callBatchSize);
+              const { data: callsData, error: callsErr } = await supabase
+                .from('call_history')
+                .select('id, call_date, outcome, lead_id, employee_id, leads(name, email, contact), employees(full_name)')
+                .in('id', batch as any[]);
+              
+              if (!callsErr && callsData) {
+                allCallsData = [...allCallsData, ...callsData];
               }
+            }
+
+            const callHistoryMap = Object.fromEntries(allCallsData.map((c: any) => [c.id, c]));
+
+            // Map call_history data to analyses
+            analysesData = analysesData.map((a: any) => ({
+              ...a,
+              call_history: a.call_id ? callHistoryMap[a.call_id] : undefined,
             }));
           }
         }
@@ -827,6 +858,44 @@ export default function ManagerDashboard() {
       toast({
         title: 'Error',
         description: error.message || 'Failed to create employee. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleUpdateEmployee = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!editingEmployee || !userRole?.company_id) return;
+
+    try {
+      // Update employee in employees table
+      const { error: employeeError } = await supabase
+        .from('employees')
+        .update({
+          full_name: editingEmployee.full_name,
+          email: editingEmployee.email,
+          phone: editingEmployee.phone || null,
+        })
+        .eq('user_id', editingEmployee.user_id)
+        .eq('company_id', userRole.company_id);
+
+      if (employeeError) throw employeeError;
+
+      toast({
+        title: 'Success',
+        description: 'Employee updated successfully',
+      });
+
+      // Reset and close modal
+      setEditingEmployee(null);
+      setIsEditEmployeeModalOpen(false);
+      fetchData();
+    } catch (error: any) {
+      console.error('Error updating employee:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update employee. Please try again.',
         variant: 'destructive',
       });
     }
@@ -1477,7 +1546,7 @@ export default function ManagerDashboard() {
 
   // Filter analyses
   const filteredAnalyses = analyses.filter(analysis => {
-    const leadName = analysis.recordings?.call_history?.leads?.name?.toLowerCase() || '';
+    const leadName = analysis.call_history?.leads?.name?.toLowerCase() || '';
     const employeeId = analysis.user_id || '';
     
     const matchesSearch = analysisSearchTerm === "" || leadName.includes(analysisSearchTerm.toLowerCase());
@@ -1748,7 +1817,7 @@ export default function ManagerDashboard() {
                 {/* Total Jobs */}
                 <Card className="bg-blue-100">
                   <CardContent className="pt-6 text-center">
-                    <div className="text-4xl font-bold">
+                    <div className="text-xl sm:text-2xl md:text-3xl font-bold whitespace-nowrap">
                       {formatNumber(jobs.length)}
                     </div>
                     <p className="text-sm text-muted-foreground mt-2">Total Jobs</p>
@@ -1758,7 +1827,7 @@ export default function ManagerDashboard() {
                 {/* High Closure Probability Candidates */}
                 <Card className="bg-green-100">
                   <CardContent className="pt-6 text-center">
-                    <div className="text-4xl font-bold">
+                    <div className="text-xl sm:text-2xl md:text-3xl font-bold whitespace-nowrap">
                       {formatNumber(dateFilteredAnalyses.filter(a => (a.closure_probability || 0) >= 85).length)}
                     </div>
                     <p className="text-sm text-muted-foreground mt-2">High Closure (85%+)</p>
@@ -1768,7 +1837,7 @@ export default function ManagerDashboard() {
                 {/* High-Risk Candidates */}
                 <Card className="bg-orange-100">
                   <CardContent className="pt-6 text-center">
-                    <div className="text-4xl font-bold">
+                    <div className="text-xl sm:text-2xl md:text-3xl font-bold whitespace-nowrap">
                       {formatNumber(dateFilteredAnalyses.filter(a => {
                         const risk = parseFloat(a.candidate_acceptance_risk) || 0;
                         return risk >= 40;
@@ -1783,7 +1852,7 @@ export default function ManagerDashboard() {
                 {/* Call Quality Score */}
                 <Card className="bg-purple-100">
                   <CardContent className="pt-6 text-center">
-                    <div className="text-4xl font-bold">
+                    <div className="text-xl sm:text-2xl md:text-3xl font-bold whitespace-nowrap">
                       {dateFilteredAnalyses.length > 0
                         ? Math.round(dateFilteredAnalyses.reduce((sum, a) => sum + (a.call_quality_score || 0), 0) / dateFilteredAnalyses.length)
                         : 0}%
@@ -1815,7 +1884,7 @@ export default function ManagerDashboard() {
                                 { name: 'No Answer', value: dateFilteredCalls.filter(c => c.outcome === 'no-answer').length, fill: '#6366f1' },
                                 { name: 'Failed', value: dateFilteredCalls.filter(c => c.outcome === 'Failed').length, fill: '#ef4444' },
                               ].filter(d => d.value > 0)}
-                              cx="35%"
+                              cx="50%"
                               cy="50%"
                               innerRadius={50}
                               outerRadius={85}
@@ -1943,7 +2012,7 @@ export default function ManagerDashboard() {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       <Card>
                         <CardContent className="pt-6 text-center">
-                          <div className="text-4xl font-bold">{formatNumber(new Set(dateFilteredCalls.map(c => c.lead_id)).size)}</div>
+                          <div className="text-xl sm:text-2xl md:text-3xl font-bold whitespace-nowrap">{formatNumber(new Set(dateFilteredCalls.map(c => c.lead_id)).size)}</div>
                           <p className="text-sm text-muted-foreground mt-2">Total Candidates</p>
                         </CardContent>
                       </Card>
@@ -1974,13 +2043,13 @@ export default function ManagerDashboard() {
                       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                         <Card>
                           <CardContent className="pt-6 text-center">
-                            <div className="text-4xl font-bold">{formatNumber(dateFilteredCalls.length)}</div>
+                            <div className="text-xl sm:text-2xl md:text-3xl font-bold whitespace-nowrap">{formatNumber(dateFilteredCalls.length)}</div>
                             <p className="text-sm text-muted-foreground mt-2">Total Calls</p>
                           </CardContent>
                         </Card>
                         <Card>
                           <CardContent className="pt-6 text-center">
-                            <div className="text-4xl font-bold text-green-600">
+                            <div className="text-xl sm:text-2xl md:text-3xl font-bold text-green-600 whitespace-nowrap">
                               {formatNumber(dateFilteredCalls.filter(c => c.outcome === 'completed').length)}
                             </div>
                             <p className="text-sm text-muted-foreground mt-2">Contacted</p>
@@ -1988,7 +2057,7 @@ export default function ManagerDashboard() {
                         </Card>
                         <Card>
                           <CardContent className="pt-6 text-center">
-                            <div className="text-4xl font-bold text-blue-600">
+                            <div className="text-xl sm:text-2xl md:text-3xl font-bold text-blue-600 whitespace-nowrap">
                               {formatNumber(dateFilteredCalls.filter(c => c.outcome === 'no-answer').length)}
                             </div>
                             <p className="text-sm text-muted-foreground mt-2">Follow-Ups</p>
@@ -1996,7 +2065,7 @@ export default function ManagerDashboard() {
                         </Card>
                         <Card>
                           <CardContent className="pt-6 text-center">
-                            <div className="text-4xl font-bold text-red-600">
+                            <div className="text-xl sm:text-2xl md:text-3xl font-bold text-red-600 whitespace-nowrap">
                               {formatNumber(dateFilteredCalls.filter(c => (c.outcome || '').toLowerCase() === 'failed').length)}
                             </div>
                             <p className="text-sm text-muted-foreground mt-2">Failed</p>
@@ -2004,7 +2073,7 @@ export default function ManagerDashboard() {
                         </Card>
                         <Card>
                           <CardContent className="pt-6 text-center">
-                            <div className="text-4xl font-bold text-orange-600">
+                            <div className="text-xl sm:text-2xl md:text-3xl font-bold text-orange-600 whitespace-nowrap">
                               {formatNumber(dateFilteredCalls.filter(c => c.outcome === 'busy').length)}
                             </div>
                             <p className="text-sm text-muted-foreground mt-2">Busy</p>
@@ -2023,7 +2092,7 @@ export default function ManagerDashboard() {
                       </CardHeader>
                       <CardContent>
                         <div className="text-center">
-                          <div className="text-3xl font-bold text-purple-600">
+                          <div className="text-xl md:text-2xl lg:text-3xl font-bold text-purple-600 break-words">
                             {(() => {
                               const relevantCalls = dateFilteredCalls.filter(c => (c.exotel_duration || 0) >= 30);
                               if (relevantCalls.length === 0) return '0m 0s';
@@ -2049,7 +2118,7 @@ export default function ManagerDashboard() {
                       </CardHeader>
                       <CardContent>
                         <div className="text-center">
-                          <div className="text-3xl font-bold text-blue-600">
+                          <div className="text-xl md:text-2xl lg:text-3xl font-bold text-blue-600 break-words">
                             {(() => {
                               const totalSeconds = dateFilteredCalls.reduce((sum, c) => sum + (c.exotel_duration || 0), 0);
                               const hours = Math.floor(totalSeconds / 3600);
@@ -3123,25 +3192,66 @@ export default function ManagerDashboard() {
 
 
             <TabsContent value="call-history" className="space-y-6">
-              {/* Header with Filters */}
+              {/* Header */}
+              <div>
+                <h2 className="text-2xl font-bold">Team Call History</h2>
+                <p className="text-muted-foreground mt-1">View and manage all team member calls</p>
+              </div>
+              
+              {/* Filters and Sorting */}
               <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-bold">Team Call History</h2>
-                  <p className="text-muted-foreground mt-1">View and manage all team member calls</p>
-                </div>
                 <div className="flex items-center gap-2">
-                  <Select value={callDateFilter} onValueChange={setCallDateFilter}>
+                  <Select value={callDateFilter} onValueChange={(value) => {
+                    setCallDateFilter(value);
+                    if (value !== 'all') setSelectedCallDate(undefined);
+                  }}>
                     <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Last 30 days" />
+                      <SelectValue placeholder="This Month" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Time</SelectItem>
                       <SelectItem value="today">Today</SelectItem>
                       <SelectItem value="yesterday">Yesterday</SelectItem>
                       <SelectItem value="week">Last 7 days</SelectItem>
-                      <SelectItem value="month">Last 30 days</SelectItem>
+                      <SelectItem value="month">This Month</SelectItem>
                     </SelectContent>
                   </Select>
+
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className={`w-[180px] justify-start text-left font-normal ${
+                          !selectedCallDate && "text-muted-foreground"
+                        }`}
+                      >
+                        <Calendar className="mr-2 h-4 w-4" />
+                        {selectedCallDate ? format(selectedCallDate, "PPP") : "Pick a date"}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <CalendarComponent
+                        mode="single"
+                        selected={selectedCallDate}
+                        onSelect={(date) => {
+                          setSelectedCallDate(date);
+                          if (date) setCallDateFilter('all');
+                        }}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+
+                  {selectedCallDate && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setSelectedCallDate(undefined)}
+                      className="h-8 px-2"
+                    >
+                      Clear
+                    </Button>
+                  )}
 
                   <Select value={selectedEmployeeFilter} onValueChange={setSelectedEmployeeFilter}>
                     <SelectTrigger className="w-[220px]">
@@ -3231,6 +3341,36 @@ export default function ManagerDashboard() {
                   >
                     Failed ({baseFilteredCalls.filter(c => c.outcome === 'Failed').length})
                   </button>
+                  <button
+                    onClick={() => setCallOutcomeFilter('busy')}
+                    className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+                      callOutcomeFilter === 'busy'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Busy ({baseFilteredCalls.filter(c => c.outcome === 'busy').length})
+                  </button>
+                  <button
+                    onClick={() => setCallOutcomeFilter('relevant')}
+                    className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+                      callOutcomeFilter === 'relevant'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Relevant ({baseFilteredCalls.filter(c => c.outcome === 'completed' && (c.exotel_duration || 0) > 30).length})
+                  </button>
+                  <button
+                    onClick={() => setCallOutcomeFilter('irrelevant')}
+                    className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+                      callOutcomeFilter === 'irrelevant'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Irrelevant ({baseFilteredCalls.filter(c => c.outcome === 'completed' && (c.exotel_duration || 0) <= 30).length})
+                  </button>
                 </div>
               </div>
 
@@ -3269,6 +3409,12 @@ export default function ManagerDashboard() {
                           );
                           // Include calls with follow-up details OR no-answer outcome
                           filteredCalls = filteredCalls.filter(call => followUpCallIds.has(call.id) || call.outcome === 'no-answer');
+                        } else if (callOutcomeFilter === 'relevant') {
+                          // Relevant calls are completed calls with duration > 30 seconds
+                          filteredCalls = filteredCalls.filter(call => call.outcome === 'completed' && (call.exotel_duration || 0) > 30);
+                        } else if (callOutcomeFilter === 'irrelevant') {
+                          // Irrelevant calls are completed calls with duration <= 30 seconds
+                          filteredCalls = filteredCalls.filter(call => call.outcome === 'completed' && (call.exotel_duration || 0) <= 30);
                         } else {
                           filteredCalls = filteredCalls.filter(call => call.outcome === callOutcomeFilter);
                         }
@@ -3493,7 +3639,7 @@ export default function ManagerDashboard() {
                 <div className="flex items-center gap-2">
                   <Badge variant="outline" className="px-3 py-1">
                     <BarChart3 className="h-3 w-3 mr-1" />
-                    {filteredAnalyses.length} Analyses
+                    {formatNumber(filteredAnalyses.length)} Analyses
                   </Badge>
                 </div>
               </div>
@@ -3506,7 +3652,7 @@ export default function ManagerDashboard() {
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-sm font-medium text-purple-700">Total Analyses</p>
-                          <p className="text-3xl font-bold text-purple-900 mt-1">{analyses.length}</p>
+                          <p className="text-3xl font-bold text-purple-900 mt-1">{formatNumber(analyses.length)}</p>
                         </div>
                         <div className="h-12 w-12 bg-purple-200 rounded-full flex items-center justify-center">
                           <BarChart3 className="h-6 w-6 text-purple-600" />
@@ -3612,7 +3758,7 @@ export default function ManagerDashboard() {
                     </CardContent>
                   </Card>
                 ) : (
-                  filteredAnalyses.map((analysis) => (
+                  filteredAnalyses.slice((analysisPage - 1) * ITEMS_PER_PAGE, analysisPage * ITEMS_PER_PAGE).map((analysis) => (
                     <Card 
                       key={analysis.id} 
                       className="hover:shadow-lg transition-all duration-200 cursor-pointer"
@@ -3624,14 +3770,14 @@ export default function ManagerDashboard() {
                           <div className="flex-1">
                             <div className="flex items-center gap-3 mb-3">
                               <h3 className="text-lg font-semibold text-gray-900">
-                                {analysis.recordings?.call_history?.leads?.name || 'Unknown Lead'}
+                                {analysis.call_history?.leads?.name || 'Unknown Lead'}
                               </h3>
                               <Badge 
                                 variant="outline"
                                 className="capitalize text-xs"
                               >
                                 <User className="h-3 w-3 mr-1" />
-                                {analysis.recordings?.call_history?.employees?.full_name || 'Unknown Employee'}
+                                {analysis.call_history?.employees?.full_name || 'Unknown Employee'}
                               </Badge>
                             </div>
 
@@ -3653,14 +3799,24 @@ export default function ManagerDashboard() {
                                 </div>
                               )}
 
-                              {/* Date */}
-                              <p className="text-xs text-gray-500">
-                                Analyzed on {new Date(analysis.created_at).toLocaleDateString('en-US', { 
-                                  month: 'short', 
-                                  day: 'numeric', 
-                                  year: 'numeric' 
-                                })}
-                              </p>
+                              {/* Status */}
+                              <div className="flex items-center gap-2">
+                                <Badge 
+                                  variant={analysis.status === 'completed' ? 'default' : analysis.status === 'failed' ? 'destructive' : 'secondary'}
+                                  className="text-xs capitalize"
+                                >
+                                  {analysis.status || 'pending'}
+                                </Badge>
+                                {analysis.status === 'completed' && (
+                                  <p className="text-xs text-gray-500">
+                                    {new Date(analysis.created_at).toLocaleDateString('en-US', { 
+                                      month: 'short', 
+                                      day: 'numeric', 
+                                      year: 'numeric' 
+                                    })}
+                                  </p>
+                                )}
+                              </div>
                             </div>
                           </div>
 
@@ -3676,6 +3832,60 @@ export default function ManagerDashboard() {
                   ))
                 )}
               </div>
+
+              {/* Pagination Controls */}
+              {filteredAnalyses.length > ITEMS_PER_PAGE && (() => {
+                const totalPages = Math.ceil(filteredAnalyses.length / ITEMS_PER_PAGE);
+                const startIndex = (analysisPage - 1) * ITEMS_PER_PAGE + 1;
+                const endIndex = Math.min(analysisPage * ITEMS_PER_PAGE, filteredAnalyses.length);
+                
+                return (
+                  <div className="mt-6">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-gray-500">
+                        Showing {startIndex} to {endIndex} of {filteredAnalyses.length} analyses
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setAnalysisPage(1)}
+                          disabled={analysisPage === 1}
+                        >
+                          First
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setAnalysisPage(p => Math.max(1, p - 1))}
+                          disabled={analysisPage === 1}
+                        >
+                          Previous
+                        </Button>
+                        <span className="text-sm text-gray-600 px-3">
+                          Page {analysisPage} of {totalPages}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setAnalysisPage(p => Math.min(totalPages, p + 1))}
+                          disabled={analysisPage === totalPages}
+                        >
+                          Next
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setAnalysisPage(totalPages)}
+                          disabled={analysisPage === totalPages}
+                        >
+                          Last
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </TabsContent>
 
             <TabsContent value="reports" className="space-y-6">
@@ -3787,6 +3997,65 @@ export default function ManagerDashboard() {
                 </form>
               </DialogContent>
             </Dialog>
+
+      {/* Edit Employee Dialog */}
+      <Dialog open={isEditEmployeeModalOpen} onOpenChange={setIsEditEmployeeModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Employee</DialogTitle>
+            <DialogDescription>
+              Update employee information.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleUpdateEmployee} className="space-y-4">
+            <div>
+              <Label htmlFor="editFullName">Full Name *</Label>
+              <Input
+                id="editFullName"
+                value={editingEmployee?.full_name || ''}
+                onChange={(e) => setEditingEmployee(prev => prev ? { ...prev, full_name: e.target.value } : null)}
+                placeholder="Enter full name"
+                required
+              />
+            </div>
+            <div>
+              <Label htmlFor="editEmail">Email *</Label>
+              <Input
+                id="editEmail"
+                type="email"
+                value={editingEmployee?.email || ''}
+                onChange={(e) => setEditingEmployee(prev => prev ? { ...prev, email: e.target.value } : null)}
+                placeholder="Enter email address"
+                required
+              />
+            </div>
+            <div>
+              <Label htmlFor="editPhone">Phone</Label>
+              <Input
+                id="editPhone"
+                value={editingEmployee?.phone || ''}
+                onChange={(e) => setEditingEmployee(prev => prev ? { ...prev, phone: e.target.value } : null)}
+                placeholder="Enter phone number"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => {
+                  setEditingEmployee(null);
+                  setIsEditEmployeeModalOpen(false);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!editingEmployee?.full_name || !editingEmployee?.email}>
+                Update Employee
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
               {/* Call Details Dialog */}
               <Dialog open={isCallDetailsModalOpen} onOpenChange={setIsCallDetailsModalOpen}>
