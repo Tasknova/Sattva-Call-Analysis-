@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { formatNumber } from "@/lib/utils";
+import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import { useSessionTimeout } from "@/hooks/useSessionTimeout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +15,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -173,6 +176,7 @@ export default function AdminDashboard() {
   const [selectedClosureProbability, setSelectedClosureProbability] = useState<string>("all");
   // Call history specific filters (match Manager dashboard)
   const [callDateFilter, setCallDateFilter] = useState<'all' | 'today' | 'yesterday' | 'week' | 'month'>('all');
+  const [selectedCallDate, setSelectedCallDate] = useState<Date | undefined>(undefined);
   const [callSearch, setCallSearch] = useState<string>('');
   const [callSortBy, setCallSortBy] = useState<'date' | 'duration' | 'agent'>('date');
   const [callSortOrder, setCallSortOrder] = useState<'desc' | 'asc'>('desc');
@@ -228,6 +232,7 @@ export default function AdminDashboard() {
   // Pagination state
   const [callHistoryPage, setCallHistoryPage] = useState(1);
   const [leadsPage, setLeadsPage] = useState(1);
+  const [analysisPage, setAnalysisPage] = useState(1);
   const ITEMS_PER_PAGE = 50;
   
   // Team Performance states
@@ -664,41 +669,72 @@ export default function AdminDashboard() {
 
       // Fetch all analyses for this company (via user_id from employees)
       const employeeUserIds = employeesData?.map(emp => emp.user_id) || [];
-      const { data: rawAnalysesData, error: analysesError } = await supabase
-        .from('analyses')
-        .select(`*, recordings ( id, file_name, recording_url, status, call_history_id )`)
-        .in('user_id', employeeUserIds);
-
-      let analysesData = rawAnalysesData as any[] | null;
-
-      if (!analysesError && analysesData && analysesData.length > 0) {
-        const callHistoryIds = Array.from(new Set(
-          analysesData.map((a: any) => a.recordings?.call_history_id).filter(Boolean)
-        ));
-
-        if (callHistoryIds.length > 0) {
-          const { data: callsData, error: callsErr } = await supabase
-            .from('call_history')
-            .select('id, call_date, outcome, lead_id, employee_id, leads(name, email, contact), employees(full_name)')
-            .in('id', callHistoryIds as any[]);
-
-          const callHistoryMap = !callsErr && callsData ? Object.fromEntries(callsData.map((c: any) => [c.id, c])) : {};
-
-          analysesData = analysesData.map((a: any) => ({
-            ...a,
-            recordings: {
-              ...a.recordings,
-              call_history: a.recordings?.call_history_id ? callHistoryMap[a.recordings.call_history_id] : undefined,
-            }
-          }));
+      
+      if (employeeUserIds.length > 0) {
+        // Fetch all analyses using pagination
+        let analysesData: any[] = [];
+        let from = 0;
+        const batchSize = 1000;
+        let hasMore = true;
+        
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from('analyses')
+            .select('*')
+            .in('user_id', employeeUserIds)
+            .range(from, from + batchSize - 1);
+          
+          if (error) {
+            console.error('Error fetching analyses batch:', error);
+            break;
+          }
+          
+          if (data && data.length > 0) {
+            analysesData = [...analysesData, ...data];
+            from += batchSize;
+            hasMore = data.length === batchSize;
+          } else {
+            hasMore = false;
+          }
         }
-      }
 
-      if (analysesError) {
-        console.error('Error fetching analyses:', analysesError);
-      } else {
+        // Enrich analyses with call_history using call_id
+        if (analysesData && analysesData.length > 0) {
+          const callIds = Array.from(new Set(
+            analysesData.map((a: any) => a.call_id).filter(Boolean)
+          ));
+
+          if (callIds.length > 0) {
+            // Fetch call_history data in batches
+            let allCallsData: any[] = [];
+            const callBatchSize = 200;
+            
+            for (let i = 0; i < callIds.length; i += callBatchSize) {
+              const batch = callIds.slice(i, i + callBatchSize);
+              const { data: callsData, error: callsErr } = await supabase
+                .from('call_history')
+                .select('id, call_date, outcome, lead_id, employee_id, leads(name, email, contact), employees(full_name)')
+                .in('id', batch as any[]);
+              
+              if (!callsErr && callsData) {
+                allCallsData = [...allCallsData, ...callsData];
+              }
+            }
+
+            const callHistoryMap = Object.fromEntries(allCallsData.map((c: any) => [c.id, c]));
+
+            // Map call_history data to analyses
+            analysesData = analysesData.map((a: any) => ({
+              ...a,
+              call_history: a.call_id ? callHistoryMap[a.call_id] : undefined,
+            }));
+          }
+        }
+
         setAnalyses(analysesData || []);
         console.log('Fetched analyses:', analysesData);
+      } else {
+        setAnalyses([]);
       }
     } catch (error) {
       console.error('Error fetching users:', error);
@@ -2288,8 +2324,8 @@ export default function AdminDashboard() {
 
   // Filter analyses
   const filteredAnalyses = analyses.filter(analysis => {
-    const leadName = analysis.recordings?.call_history?.leads?.name?.toLowerCase() || '';
-    const employeeName = analysis.recordings?.call_history?.employees?.full_name || '';
+    const leadName = analysis.call_history?.leads?.name?.toLowerCase() || '';
+    const employeeName = analysis.call_history?.employees?.full_name || '';
     const employeeId = analysis.user_id || '';
 
     const matchesSearch = analysisSearchTerm === "" || leadName.includes(analysisSearchTerm.toLowerCase());
@@ -2379,6 +2415,56 @@ export default function AdminDashboard() {
     return filtered;
   }, [calls, dateFilter, customDateRange.startDate, customDateRange.endDate]);
 
+  // Filter leads based on date range (created_at)
+  const dateFilteredLeads = useMemo(() => {
+    const now = new Date();
+    
+    const getLocalDateStr = (date: Date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    const extractDateStr = (dateString: string): string => {
+      if (!dateString) return '';
+      return dateString.substring(0, 10);
+    };
+    
+    const todayStr = getLocalDateStr(now);
+
+    const filtered = leads.filter(lead => {
+      const dateToUse = lead.created_at;
+      if (!dateToUse) return false;
+      
+      const leadDateStr = extractDateStr(dateToUse);
+
+      if (dateFilter === 'today') {
+        return leadDateStr === todayStr;
+      } else if (dateFilter === 'yesterday') {
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = getLocalDateStr(yesterday);
+        return leadDateStr === yesterdayStr;
+      } else if (dateFilter === 'week') {
+        const weekAgo = new Date(now);
+        weekAgo.setDate(weekAgo.getDate() - 6);
+        const weekAgoStr = getLocalDateStr(weekAgo);
+        return leadDateStr >= weekAgoStr && leadDateStr <= todayStr;
+      } else if (dateFilter === 'month') {
+        const monthAgo = new Date(now);
+        monthAgo.setDate(monthAgo.getDate() - 29);
+        const monthAgoStr = getLocalDateStr(monthAgo);
+        return leadDateStr >= monthAgoStr && leadDateStr <= todayStr;
+      } else if (dateFilter === 'custom' && customDateRange.startDate && customDateRange.endDate) {
+        return leadDateStr >= customDateRange.startDate && leadDateStr <= customDateRange.endDate;
+      }
+      return true;
+    });
+
+    return filtered;
+  }, [leads, dateFilter, customDateRange.startDate, customDateRange.endDate]);
+
   // Specific date filter for Call History header/table (driven by callDateFilter)
   const callDateFilteredCalls = useMemo(() => {
     const now = new Date();
@@ -2405,6 +2491,12 @@ export default function AdminDashboard() {
       // Extract date portion only (YYYY-MM-DD) to avoid timezone issues
       const callDateStr = extractDateStr(dateToUse);
 
+      // If specific date is selected, use it
+      if (selectedCallDate) {
+        const selectedDateStr = getLocalDateStr(selectedCallDate);
+        return callDateStr === selectedDateStr;
+      }
+
       if (callDateFilter === 'today') {
         const todayStr = getLocalDateStr(now);
         return callDateStr === todayStr;
@@ -2430,7 +2522,7 @@ export default function AdminDashboard() {
       }
       return true;
     });
-  }, [calls, callDateFilter]);
+  }, [calls, callDateFilter, selectedCallDate]);
 
   // Base filtered calls for header counts: apply manager, employee and search filters
   const baseFilteredCalls = useMemo(() => {
@@ -2485,8 +2577,8 @@ export default function AdminDashboard() {
     const todayStr = getLocalDateStr(now);
 
     return analyses.filter(analysis => {
-      const createdAt = analysis.recordings?.call_history?.call_date 
-        || analysis.recordings?.call_history?.created_at 
+      const createdAt = analysis.call_history?.call_date 
+        || analysis.call_history?.created_at 
         || analysis.created_at;
       if (!createdAt) return false;
 
@@ -2684,6 +2776,14 @@ export default function AdminDashboard() {
               Employees
             </Button>
             <Button
+              variant={activeSidebarItem === 'team-performance' ? 'accent' : 'ghost'}
+              className="w-full justify-start"
+              onClick={() => setActiveSidebarItem('team-performance')}
+            >
+              <TrendingUp className="h-4 w-4" />
+              Team Performance
+            </Button>
+            <Button
               variant={activeSidebarItem === 'leads' ? 'accent' : 'ghost'}
               className="w-full justify-start"
               onClick={() => setActiveSidebarItem('leads')}
@@ -2722,14 +2822,6 @@ export default function AdminDashboard() {
             >
               <BarChart3 className="h-4 w-4" />
               Analysis
-            </Button>
-            <Button
-              variant={activeSidebarItem === 'team-performance' ? 'accent' : 'ghost'}
-              className="w-full justify-start"
-              onClick={() => setActiveSidebarItem('team-performance')}
-            >
-              <TrendingUp className="h-4 w-4" />
-              Team Performance
             </Button>
             <Button
               variant={activeSidebarItem === 'reports' ? 'accent' : 'ghost'}
@@ -2903,7 +2995,7 @@ export default function AdminDashboard() {
                     <Phone className="h-5 w-5 text-pink-500" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-xl sm:text-2xl md:text-3xl font-bold whitespace-nowrap">{formatNumber(leads.length)}</div>
+                    <div className="text-xl sm:text-2xl md:text-3xl font-bold whitespace-nowrap">{formatNumber(dateFilteredLeads.length)}</div>
                   </CardContent>
                 </Card>
 
@@ -4325,6 +4417,42 @@ export default function AdminDashboard() {
                     </SelectContent>
                   </Select>
 
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className={`w-[180px] justify-start text-left font-normal ${
+                          !selectedCallDate && "text-muted-foreground"
+                        }`}
+                      >
+                        <Calendar className="mr-2 h-4 w-4" />
+                        {selectedCallDate ? format(selectedCallDate, "PPP") : "Pick a date"}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <CalendarComponent
+                        mode="single"
+                        selected={selectedCallDate}
+                        onSelect={(date) => {
+                          setSelectedCallDate(date);
+                          if (date) setCallDateFilter('all');
+                        }}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+
+                  {selectedCallDate && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setSelectedCallDate(undefined)}
+                      className="h-8 px-2"
+                    >
+                      Clear
+                    </Button>
+                  )}
+
                   {/* Manager Filter for Admin: choose manager first to enable employee filter */}
                   <Select value={selectedManagerFilter} onValueChange={(v) => setSelectedManagerFilter(v as any)}>
                     <SelectTrigger className="w-[220px]">
@@ -4422,9 +4550,9 @@ export default function AdminDashboard() {
                             const hasFollowUp = a.follow_up_details &&
                               a.follow_up_details.trim().length > 0 &&
                               !a.follow_up_details.toLowerCase().includes('irrelevant according to transcript');
-                            return hasFollowUp && a.recordings?.call_history_id;
+                            return hasFollowUp && a.call_id;
                           })
-                          .map(a => a.recordings?.call_history_id)
+                          .map(a => a.call_id)
                           .filter(Boolean)
                       );
                       // Include calls with follow-up details OR no-answer outcome
@@ -4439,6 +4567,33 @@ export default function AdminDashboard() {
                       }`}
                   >
                     Failed ({baseFilteredCalls.filter(c => c.outcome === 'Failed').length})
+                  </button>
+                  <button
+                    onClick={() => setCallOutcomeFilter('busy')}
+                    className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${callOutcomeFilter === 'busy'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                      }`}
+                  >
+                    Busy ({baseFilteredCalls.filter(c => c.outcome === 'busy').length})
+                  </button>
+                  <button
+                    onClick={() => setCallOutcomeFilter('relevant')}
+                    className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${callOutcomeFilter === 'relevant'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                      }`}
+                  >
+                    Relevant ({baseFilteredCalls.filter(c => c.outcome === 'completed' && (c.exotel_duration || 0) > 30).length})
+                  </button>
+                  <button
+                    onClick={() => setCallOutcomeFilter('irrelevant')}
+                    className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${callOutcomeFilter === 'irrelevant'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                      }`}
+                  >
+                    Irrelevant ({baseFilteredCalls.filter(c => c.outcome === 'completed' && (c.exotel_duration || 0) <= 30).length})
                   </button>
                 </div>
               </div>
@@ -4470,13 +4625,19 @@ export default function AdminDashboard() {
                                 const hasFollowUp = a.follow_up_details &&
                                   a.follow_up_details.trim().length > 0 &&
                                   !a.follow_up_details.toLowerCase().includes('irrelevant according to transcript');
-                                return hasFollowUp && a.recordings?.call_history_id;
+                                return hasFollowUp && a.call_id;
                               })
-                              .map(a => a.recordings?.call_history_id)
+                              .map(a => a.call_id)
                               .filter(Boolean)
                           );
                           // Include calls with follow-up details OR no-answer outcome
                           filteredCalls = filteredCalls.filter(call => followUpCallIds.has(call.id) || call.outcome === 'no-answer');
+                        } else if (callOutcomeFilter === 'relevant') {
+                          // Relevant calls are completed calls with duration > 30 seconds
+                          filteredCalls = filteredCalls.filter(call => call.outcome === 'completed' && (call.exotel_duration || 0) > 30);
+                        } else if (callOutcomeFilter === 'irrelevant') {
+                          // Irrelevant calls are completed calls with duration <= 30 seconds
+                          filteredCalls = filteredCalls.filter(call => call.outcome === 'completed' && (call.exotel_duration || 0) <= 30);
                         } else {
                           filteredCalls = filteredCalls.filter(call => call.outcome === callOutcomeFilter);
                         }
@@ -4628,7 +4789,7 @@ export default function AdminDashboard() {
                 // Apply outcome filter (same logic as table)
                 if (callOutcomeFilter !== 'all') {
                   if (callOutcomeFilter === 'followup') {
-                    const followUpCallIds = new Set(analyses.filter(a => a.follow_up_details && a.follow_up_details.trim().length > 0 && !a.follow_up_details.toLowerCase().includes('irrelevant according to transcript') && a.recordings?.call_history_id).map(a => a.recordings?.call_history_id).filter(Boolean));
+                    const followUpCallIds = new Set(analyses.filter(a => a.follow_up_details && a.follow_up_details.trim().length > 0 && !a.follow_up_details.toLowerCase().includes('irrelevant according to transcript') && a.call_id).map(a => a.call_id).filter(Boolean));
                     // Include calls with follow-up details OR no-answer outcome
                     filteredCalls = filteredCalls.filter(call => followUpCallIds.has(call.id) || call.outcome === 'no-answer');
                   } else {
@@ -4906,9 +5067,15 @@ export default function AdminDashboard() {
                       <p className="text-muted-foreground">No analyses found</p>
                     </div>
                   ) : (
-                    <div className="space-y-4">
-                      {filteredAnalyses.map((analysis) => {
-                        const callHistory = analysis.recordings?.call_history;
+                    <>
+                      <div className="mb-4">
+                        <p className="text-sm text-muted-foreground">
+                          Total: {formatNumber(filteredAnalyses.length)} analyses
+                        </p>
+                      </div>
+                      <div className="space-y-4">
+                        {filteredAnalyses.slice((analysisPage - 1) * ITEMS_PER_PAGE, analysisPage * ITEMS_PER_PAGE).map((analysis) => {
+                        const callHistory = analysis.call_history;
                         const leadName = callHistory?.leads?.name || leads.find((l: any) => l.id === callHistory?.lead_id)?.name || 'Unknown Lead';
                         const employeeName = callHistory?.employees?.full_name || employees.find((e: any) => e.id === callHistory?.employee_id)?.full_name || employees.find((e: any) => e.user_id === callHistory?.employee_id)?.full_name || 'Unknown Employee';
 
@@ -4953,6 +5120,61 @@ export default function AdminDashboard() {
                         );
                       })}
                     </div>
+                    
+                    {/* Pagination Controls */}
+                    {filteredAnalyses.length > ITEMS_PER_PAGE && (() => {
+                      const totalPages = Math.ceil(filteredAnalyses.length / ITEMS_PER_PAGE);
+                      const startIndex = (analysisPage - 1) * ITEMS_PER_PAGE + 1;
+                      const endIndex = Math.min(analysisPage * ITEMS_PER_PAGE, filteredAnalyses.length);
+                      
+                      return (
+                        <div className="mt-6">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm text-gray-500">
+                              Showing {startIndex} to {endIndex} of {filteredAnalyses.length} analyses
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setAnalysisPage(1)}
+                                disabled={analysisPage === 1}
+                              >
+                                First
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setAnalysisPage(p => Math.max(1, p - 1))}
+                                disabled={analysisPage === 1}
+                              >
+                                Previous
+                              </Button>
+                              <span className="text-sm text-gray-600 px-3">
+                                Page {analysisPage} of {totalPages}
+                              </span>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setAnalysisPage(p => Math.min(totalPages, p + 1))}
+                                disabled={analysisPage === totalPages}
+                              >
+                                Next
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setAnalysisPage(totalPages)}
+                                disabled={analysisPage === totalPages}
+                              >
+                                Last
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </>
                   )}
                 </CardContent>
               </Card>

@@ -92,46 +92,43 @@ export default function AdminReportsPage() {
     let startDateStr: string;
     let endDateStr: string;
 
-    const formatDateToISO = (date: Date, isEndOfDay: boolean = false) => {
+    // Format date as YYYY-MM-DD (simple date format for call_date comparison)
+    const formatDateStr = (date: Date) => {
       const year = date.getFullYear();
       const month = String(date.getMonth() + 1).padStart(2, '0');
       const day = String(date.getDate()).padStart(2, '0');
-      
-      if (isEndOfDay) {
-        return `${year}-${month}-${day}T23:59:59.999Z`;
-      } else {
-        return `${year}-${month}-${day}T00:00:00.000Z`;
-      }
+      return `${year}-${month}-${day}`;
     };
 
     if (dateFilter === 'today') {
-      startDateStr = formatDateToISO(now, false);
-      endDateStr = formatDateToISO(now, true);
+      startDateStr = formatDateStr(now);
+      endDateStr = formatDateStr(now);
     } else if (dateFilter === 'yesterday') {
       const yesterday = new Date();
       yesterday.setDate(now.getDate() - 1);
-      startDateStr = formatDateToISO(yesterday, false);
-      endDateStr = formatDateToISO(yesterday, true);
+      startDateStr = formatDateStr(yesterday);
+      endDateStr = formatDateStr(yesterday);
     } else if (dateFilter === 'this_week') {
-      const weekAgo = new Date();
-      weekAgo.setDate(now.getDate() - 7);
-      startDateStr = formatDateToISO(weekAgo, false);
-      endDateStr = formatDateToISO(now, true);
+      // Last 7 days including today
+      const weekAgo = new Date(now);
+      weekAgo.setDate(now.getDate() - 6);
+      startDateStr = formatDateStr(weekAgo);
+      endDateStr = formatDateStr(now);
     } else if (dateFilter === 'this_month') {
-      const monthAgo = new Date();
-      monthAgo.setDate(now.getDate() - 30);
-      startDateStr = formatDateToISO(monthAgo, false);
-      endDateStr = formatDateToISO(now, true);
+      // First day of current month to last day of current month
+      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      startDateStr = formatDateStr(firstDayOfMonth);
+      const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      endDateStr = formatDateStr(lastDayOfMonth);
     } else if (dateFilter === 'custom' && customDateRange.startDate && customDateRange.endDate) {
-      const startDate = new Date(customDateRange.startDate);
-      const endDate = new Date(customDateRange.endDate);
-      startDateStr = formatDateToISO(startDate, false);
-      endDateStr = formatDateToISO(endDate, true);
+      startDateStr = customDateRange.startDate;
+      endDateStr = customDateRange.endDate;
     } else {
-      const monthAgo = new Date();
-      monthAgo.setDate(now.getDate() - 30);
-      startDateStr = formatDateToISO(monthAgo, false);
-      endDateStr = formatDateToISO(now, true);
+      // Default to this month
+      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      startDateStr = formatDateStr(firstDayOfMonth);
+      const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      endDateStr = formatDateStr(lastDayOfMonth);
     }
 
     return { startDate: startDateStr, endDate: endDateStr };
@@ -151,12 +148,12 @@ export default function AdminReportsPage() {
       console.log('Fetching report data for company_id:', userRole.company_id);
       console.log('Date Filter:', dateFilter);
       console.log('Custom Date Range:', customDateRange);
-      console.log('Date range:', { 
+      console.log('Date range CALCULATED:', { 
         startDate, 
         endDate,
-        startDateLocal: new Date(startDate).toLocaleString(),
-        endDateLocal: new Date(endDate).toLocaleString()
+        filterType: dateFilter
       });
+      console.log('Start Date:', startDate, '| End Date:', endDate);
 
       // Fetch all managers (removed is_active filter to see all managers)
       const { data: managersData, error: managersError } = await supabase
@@ -184,59 +181,145 @@ export default function AdminReportsPage() {
       
       console.log('Employees fetched:', employeesData?.length || 0, employeesData);
 
-      setManagers(managersData || []);
-      setEmployees(employeesData || []);
+      // Filter active employees and managers for display
+      const activeManagers = (managersData || []).filter(mgr => mgr.is_active === true);
+      const activeEmployees = (employeesData || []).filter(emp => emp.is_active === true);
+      setManagers(activeManagers);
+      setEmployees(activeEmployees);
+      
+      console.log('Active managers:', activeManagers.length);
+      console.log('Active employees:', activeEmployees.length);
+
+      const employeeIds = (employeesData || []).map(emp => emp.user_id);
+      console.log('Employee user_ids:', employeeIds);
 
       // Fetch calls for the period using call_date
-      // Note: employee_id in call_history is actually the user_id from employees table
       console.log('=== CALL HISTORY QUERY DEBUG ===');
       console.log('Date Filter:', dateFilter);
       console.log('Start Date:', startDate);
       console.log('End Date:', endDate);
-      console.log('Company ID:', userRole.company_id);
+      console.log('Employee IDs:', employeeIds);
       
-      const { data: callsData, error: callsError } = await supabase
-        .from('call_history')
-        .select('*')
-        .eq('company_id', userRole.company_id)
-        .gte('call_date', startDate)
-        .lte('call_date', endDate);
+      // Fetch all calls for employees using pagination (Supabase has 1000 row limit per request)
+      let allCallsData: any[] = [];
+      let from = 0;
+      const batchSize = 1000;
+      let hasMore = true;
       
-      console.log('Calls returned:', callsData?.length || 0);
-      if (callsData && callsData.length > 0) {
-        console.log('Sample call:', callsData[0]);
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('call_history')
+          .select('*')
+          .in('employee_id', employeeIds)
+          .range(from, from + batchSize - 1);
+        
+        if (error) {
+          console.error('Error fetching calls batch:', error);
+          break;
+        }
+        
+        if (data && data.length > 0) {
+          allCallsData = [...allCallsData, ...data];
+          from += batchSize;
+          hasMore = data.length === batchSize;
+        } else {
+          hasMore = false;
+        }
       }
-      console.log('Query error:', callsError);
 
-      if (callsError) {
-        console.error('Error fetching calls:', callsError);
-        throw callsError;
-      }
+      // Helper to extract YYYY-MM-DD from any date string
+      const extractDateStr = (dateString: string): string => {
+        if (!dateString) return '';
+        return dateString.substring(0, 10); // Take first 10 chars: YYYY-MM-DD
+      };
+
+      // Filter calls by date range (using call_date or fallback to created_at)
+      const callsData = (allCallsData || []).filter(call => {
+        const dateToUse = call.call_date || call.created_at;
+        if (!dateToUse) return false;
+        const callDateStr = extractDateStr(dateToUse);
+        const isInRange = callDateStr >= startDate && callDateStr <= endDate;
+        return isInRange;
+      });
       
-      console.log('Calls fetched:', callsData?.length || 0);
-      console.log('Call details:', callsData?.map(c => ({
-        id: c.id,
-        employee_id: c.employee_id,
-        outcome: c.outcome,
-        created_at: c.created_at,
-        created_at_local: new Date(c.created_at).toLocaleString()
-      })));
+      console.log('All calls fetched:', allCallsData?.length || 0);
+      console.log('Date range filter:', startDate, 'to', endDate);
+      console.log('Calls after date filter:', callsData?.length || 0);
+      if (allCallsData && allCallsData.length > 0) {
+        console.log('First call sample:', {
+          call_date: allCallsData[0].call_date,
+          extracted: extractDateStr(allCallsData[0].call_date || allCallsData[0].created_at || ''),
+          inRange: allCallsData[0].call_date ? 
+            (extractDateStr(allCallsData[0].call_date) >= startDate && extractDateStr(allCallsData[0].call_date) <= endDate) : 
+            'no call_date'
+        });
+      }
 
-      // Fetch analyses for the period (simplified query without company_id)
+      // Fetch recordings for these calls to get recording_ids
       const callIds = (callsData || []).map(call => call.id);
-      const { data: analysesData, error: analysesError } = await supabase
-        .from('analyses')
-        .select('*')
-        .in('call_id', callIds);
+      let analysesData: any[] = [];
+      
+      console.log('=== ANALYSES FETCHING DEBUG ===');
+      console.log('Total call IDs to fetch recordings for:', callIds.length);
+      console.log('Sample call IDs:', callIds.slice(0, 5));
+      
+      // Only fetch analyses if there are calls to query
+      if (callIds.length > 0) {
+        // Batch the call IDs into chunks of 200 to avoid URL length limits
+        const batchSize = 200;
+        let allRecordings: any[] = [];
+        
+        for (let i = 0; i < callIds.length; i += batchSize) {
+          const batch = callIds.slice(i, i + batchSize);
+          const { data: recordingsData, error: recordingsError } = await supabase
+            .from('recordings')
+            .select('id, call_history_id')
+            .in('call_history_id', batch);
 
-      if (analysesError) {
-        console.error('Error fetching analyses:', analysesError);
-        throw analysesError;
+          if (recordingsError) {
+            console.error('Error fetching recordings batch:', recordingsError);
+          } else {
+            allRecordings = [...allRecordings, ...(recordingsData || [])];
+          }
+        }
+
+        const recordingIds = allRecordings.map(r => r.id);
+        console.log('Total recordings fetched:', allRecordings.length);
+        console.log('Total recording IDs:', recordingIds.length);
+        console.log('Sample recordings:', allRecordings.slice(0, 3));
+        
+        // Then fetch analyses using recording_ids (also batched)
+        if (recordingIds.length > 0) {
+          let allAnalyses: any[] = [];
+          
+          for (let i = 0; i < recordingIds.length; i += batchSize) {
+            const batch = recordingIds.slice(i, i + batchSize);
+            const { data, error: analysesError } = await supabase
+              .from('analyses')
+              .select(`
+                *,
+                recordings (
+                  id,
+                  call_history_id
+                )
+              `)
+              .in('recording_id', batch);
+
+            if (analysesError) {
+              console.error('Error fetching analyses batch:', analysesError);
+            } else {
+              allAnalyses = [...allAnalyses, ...(data || [])];
+            }
+          }
+          
+          analysesData = allAnalyses;
+        }
       }
       
-      console.log('Analyses fetched:', analysesData?.length || 0, analysesData);
+      console.log('Total analyses fetched:', analysesData?.length || 0);
+      console.log('Sample analyses:', analysesData?.slice(0, 3));
 
-      // Create a map of call_id to employee_id for quick lookup
+// Create a map of call_history_id to employee_id for quick lookup
       const callIdToEmployeeMap = new Map();
       callsData?.forEach(call => {
         callIdToEmployeeMap.set(call.id, call.employee_id);
@@ -254,9 +337,10 @@ export default function AdminReportsPage() {
           call.employee_id && employeeUserIds.includes(call.employee_id)
         ) || [];
         
-        // Match analyses by checking if the call_id belongs to employees under this manager
+        // Match analyses by checking if the call_history_id belongs to employees under this manager
         const managerAnalyses = analysesData?.filter(analysis => {
-          const employeeId = callIdToEmployeeMap.get(analysis.call_id);
+          const callHistoryId = analysis.recordings?.call_history_id;
+          const employeeId = callIdToEmployeeMap.get(callHistoryId);
           return employeeId && employeeUserIds.includes(employeeId);
         }) || [];
 
@@ -305,9 +389,10 @@ export default function AdminReportsPage() {
       const employeeStatsMap = new Map();
       employeesData?.forEach(employee => {
         const employeeCalls = callsData?.filter(call => call.employee_id === employee.user_id) || [];
-        // Match analyses by checking if the call_id belongs to this employee
+        // Match analyses by checking if the call_history_id belongs to this employee
         const employeeAnalyses = analysesData?.filter(analysis => {
-          const employeeId = callIdToEmployeeMap.get(analysis.call_id);
+          const callHistoryId = analysis.recordings?.call_history_id;
+          const employeeId = callIdToEmployeeMap.get(callHistoryId);
           return employeeId === employee.user_id;
         }) || [];
 
@@ -349,10 +434,7 @@ export default function AdminReportsPage() {
 
       setEmployeeStats(employeeStatsMap);
 
-      // Company overview (filter only active managers and employees for overview)
-      const activeManagers = managersData?.filter(m => m.is_active === true) || [];
-      const activeEmployees = employeesData?.filter(e => e.is_active === true) || [];
-      
+      // Company overview (using already filtered active managers and employees)
       console.log('Active managers count:', activeManagers.length);
       console.log('Active employees count:', activeEmployees.length);
       
@@ -456,7 +538,7 @@ export default function AdminReportsPage() {
                   <SelectContent>
                     <SelectItem value="today">Today</SelectItem>
                     <SelectItem value="yesterday">Yesterday</SelectItem>
-                    <SelectItem value="this_week">This Week</SelectItem>
+                    <SelectItem value="this_week">Last 7 days</SelectItem>
                     <SelectItem value="this_month">This Month</SelectItem>
                     <SelectItem value="custom">Custom Range</SelectItem>
                   </SelectContent>
@@ -687,7 +769,13 @@ export default function AdminReportsPage() {
                         {/* Collapsible Employee List */}
                         {isExpanded && (
                           <div className="mt-4 space-y-3">
-                            {managerEmployees.map(employee => {
+                            {managerEmployees
+                              .sort((a, b) => {
+                                const statsA = employeeStats.get(a.id);
+                                const statsB = employeeStats.get(b.id);
+                                return (statsB?.total_calls || 0) - (statsA?.total_calls || 0);
+                              })
+                              .map(employee => {
                               const empStats = employeeStats.get(employee.id);
                               return (
                                 <div key={employee.id} className="border rounded-lg p-4 bg-white">
