@@ -188,7 +188,7 @@ export default function ManagerDashboard() {
   const [csvAssignedTo, setCsvAssignedTo] = useState<string>('unassigned');
   const [isCredentialsModalOpen, setIsCredentialsModalOpen] = useState(false);
   const [isSignOutDialogOpen, setIsSignOutDialogOpen] = useState(false);
-  const [dateRangeFilter, setDateRangeFilter] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('week');
+  const [dateRangeFilter, setDateRangeFilter] = useState<'today' | 'yesterday' | 'thisWeek' | 'week' | 'month' | 'custom'>('thisWeek');
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
   const [callDateFilter, setCallDateFilter] = useState<string>('all');
@@ -200,7 +200,7 @@ export default function ManagerDashboard() {
   const [callsChartEmployeeFilter, setCallsChartEmployeeFilter] = useState<string>('all');
   
   // Team Performance filters
-  const [teamPerfDateFilter, setTeamPerfDateFilter] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('today');
+  const [teamPerfDateFilter, setTeamPerfDateFilter] = useState<'today' | 'yesterday' | 'thisWeek' | 'week' | 'month' | 'custom'>('today');
   const [teamPerfCustomStartDate, setTeamPerfCustomStartDate] = useState<string>('');
   const [teamPerfCustomEndDate, setTeamPerfCustomEndDate] = useState<string>('');
   
@@ -210,8 +210,8 @@ export default function ManagerDashboard() {
   const [analysisPage, setAnalysisPage] = useState(1);
   const ITEMS_PER_PAGE = 50;
   const [teamPerfEmployeeFilter, setTeamPerfEmployeeFilter] = useState<string>('all');
-  const [teamPerfSortBy, setTeamPerfSortBy] = useState<'name' | 'totalCalls' | 'relevantCalls' | 'irrelevantCalls' | 'contacted' | 'notAnswered' | 'failed' | 'busy' | 'duration' | 'avgTime'>('name');
-  const [teamPerfSortOrder, setTeamPerfSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [teamPerfSortBy, setTeamPerfSortBy] = useState<'name' | 'totalCalls' | 'relevantCalls' | 'irrelevantCalls' | 'contacted' | 'notAnswered' | 'failed' | 'busy' | 'duration' | 'avgTime'>('totalCalls');
+  const [teamPerfSortOrder, setTeamPerfSortOrder] = useState<'asc' | 'desc'>('desc');
   const [selectedCallForDetails, setSelectedCallForDetails] = useState<any>(null);
   const [isCallDetailsModalOpen, setIsCallDetailsModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
@@ -290,6 +290,19 @@ export default function ManagerDashboard() {
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayStr = getLocalDateStr(yesterday);
         return callDateStr === yesterdayStr;
+      
+      case 'thisWeek': {
+        // Current week Monday to Saturday
+        const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // Sun=6, Mon=0, Tue=1...
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - daysFromMonday);
+        const saturday = new Date(monday);
+        saturday.setDate(monday.getDate() + 5);
+        const mondayStr = getLocalDateStr(monday);
+        const saturdayStr = getLocalDateStr(saturday);
+        return callDateStr >= mondayStr && callDateStr <= saturdayStr;
+      }
       
       case 'week': {
         // Last 7 days including today
@@ -490,6 +503,15 @@ export default function ManagerDashboard() {
       case 'yesterday':
         const yesterdayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1);
         return dateUTC === yesterdayUTC;
+      
+      case 'thisWeek': {
+        // Current week Monday to Saturday
+        const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        const mondayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysFromMonday);
+        const saturdayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysFromMonday + 5);
+        return dateUTC >= mondayUTC && dateUTC <= saturdayUTC;
+      }
       
       case 'week':
         const weekAgoUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6);
@@ -1765,6 +1787,13 @@ export default function ManagerDashboard() {
                         Yesterday
                       </Button>
                       <Button 
+                        variant={dateRangeFilter === 'thisWeek' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setDateRangeFilter('thisWeek')}
+                      >
+                        This Week
+                      </Button>
+                      <Button 
                         variant={dateRangeFilter === 'week' ? 'default' : 'outline'}
                         size="sm"
                         onClick={() => setDateRangeFilter('week')}
@@ -2224,6 +2253,13 @@ export default function ManagerDashboard() {
                           onClick={() => setTeamPerfDateFilter('yesterday')}
                         >
                           Yesterday
+                        </Button>
+                        <Button 
+                          variant={teamPerfDateFilter === 'thisWeek' ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setTeamPerfDateFilter('thisWeek')}
+                        >
+                          This Week
                         </Button>
                         <Button 
                           variant={teamPerfDateFilter === 'week' ? 'default' : 'outline'}

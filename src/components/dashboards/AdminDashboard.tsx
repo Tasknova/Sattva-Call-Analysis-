@@ -222,7 +222,7 @@ export default function AdminDashboard() {
   const [phoneAssignments, setPhoneAssignments] = useState<any[]>([]);
 
   // Date filter state
-  const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('month');
+  const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'thisWeek' | 'week' | 'month' | 'custom'>('thisWeek');
   const [customDateRange, setCustomDateRange] = useState({
     startDate: '',
     endDate: ''
@@ -237,12 +237,12 @@ export default function AdminDashboard() {
   
   // Team Performance states
   const [selectedManagerForTeamPerf, setSelectedManagerForTeamPerf] = useState<string>('');
-  const [teamPerfDateFilter, setTeamPerfDateFilter] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('today');
+  const [teamPerfDateFilter, setTeamPerfDateFilter] = useState<'today' | 'yesterday' | 'thisWeek' | 'week' | 'month' | 'custom'>('today');
   const [teamPerfCustomStartDate, setTeamPerfCustomStartDate] = useState<string>('');
   const [teamPerfCustomEndDate, setTeamPerfCustomEndDate] = useState<string>('');
   const [teamPerfEmployeeFilter, setTeamPerfEmployeeFilter] = useState<string>('all');
-  const [teamPerfSortBy, setTeamPerfSortBy] = useState<'name' | 'totalCalls' | 'relevantCalls' | 'irrelevantCalls' | 'contacted' | 'notAnswered' | 'failed' | 'busy' | 'duration' | 'avgTime'>('name');
-  const [teamPerfSortOrder, setTeamPerfSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [teamPerfSortBy, setTeamPerfSortBy] = useState<'name' | 'totalCalls' | 'relevantCalls' | 'irrelevantCalls' | 'contacted' | 'notAnswered' | 'failed' | 'busy' | 'duration' | 'avgTime'>('totalCalls');
+  const [teamPerfSortOrder, setTeamPerfSortOrder] = useState<'asc' | 'desc'>('desc');
 
   const [newUser, setNewUser] = useState({
     email: "",
@@ -2393,6 +2393,17 @@ export default function AdminDashboard() {
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayStr = getLocalDateStr(yesterday);
         return callDateStr === yesterdayStr;
+      } else if (dateFilter === 'thisWeek') {
+        // Current week Monday to Saturday
+        const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - daysFromMonday);
+        const saturday = new Date(monday);
+        saturday.setDate(monday.getDate() + 5);
+        const mondayStr = getLocalDateStr(monday);
+        const saturdayStr = getLocalDateStr(saturday);
+        return callDateStr >= mondayStr && callDateStr <= saturdayStr;
       } else if (dateFilter === 'week') {
         // Last 7 days including today
         const weekAgo = new Date(now);
@@ -2446,6 +2457,17 @@ export default function AdminDashboard() {
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayStr = getLocalDateStr(yesterday);
         return leadDateStr === yesterdayStr;
+      } else if (dateFilter === 'thisWeek') {
+        // Current week Monday to Saturday
+        const dayOfWeek = now.getDay();
+        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - daysFromMonday);
+        const saturday = new Date(monday);
+        saturday.setDate(monday.getDate() + 5);
+        const mondayStr = getLocalDateStr(monday);
+        const saturdayStr = getLocalDateStr(saturday);
+        return leadDateStr >= mondayStr && leadDateStr <= saturdayStr;
       } else if (dateFilter === 'week') {
         const weekAgo = new Date(now);
         weekAgo.setDate(weekAgo.getDate() - 6);
@@ -2592,6 +2614,17 @@ export default function AdminDashboard() {
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayStr = getLocalDateStr(yesterday);
         return analysisDateStr === yesterdayStr;
+      } else if (dateFilter === 'thisWeek') {
+        // Current week Monday to Saturday
+        const dayOfWeek = now.getDay();
+        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - daysFromMonday);
+        const saturday = new Date(monday);
+        saturday.setDate(monday.getDate() + 5);
+        const mondayStr = getLocalDateStr(monday);
+        const saturdayStr = getLocalDateStr(saturday);
+        return analysisDateStr >= mondayStr && analysisDateStr <= saturdayStr;
       } else if (dateFilter === 'week') {
         // Last 7 days including today
         const weekAgo = new Date(now);
@@ -2629,6 +2662,17 @@ export default function AdminDashboard() {
         const yesterdayStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
         const yesterdayEnd = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59, 999);
         return prodTime >= yesterdayStart.getTime() && prodTime <= yesterdayEnd.getTime();
+      } else if (dateFilter === 'thisWeek') {
+        // Current week Monday to Saturday
+        const dayOfWeek = now.getDay();
+        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - daysFromMonday);
+        weekStart.setHours(0, 0, 0, 0);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 5); // Saturday
+        weekEnd.setHours(23, 59, 59, 999);
+        return prodTime >= weekStart.getTime() && prodTime <= weekEnd.getTime();
       } else if (dateFilter === 'week') {
         // Get Monday of current week as start
         const weekStart = new Date(now);
@@ -2882,6 +2926,16 @@ export default function AdminDashboard() {
                         }}
                       >
                         Yesterday
+                      </Button>
+                      <Button
+                        variant={dateFilter === 'thisWeek' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => {
+                          setDateFilter('thisWeek');
+                          setShowCustomDatePicker(false);
+                        }}
+                      >
+                        This Week
                       </Button>
                       <Button
                         variant={dateFilter === 'week' ? 'default' : 'outline'}
@@ -5237,6 +5291,13 @@ export default function AdminDashboard() {
                               Yesterday
                             </Button>
                             <Button 
+                              variant={teamPerfDateFilter === 'thisWeek' ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => setTeamPerfDateFilter('thisWeek')}
+                            >
+                              This Week
+                            </Button>
+                            <Button 
                               variant={teamPerfDateFilter === 'week' ? 'default' : 'outline'}
                               size="sm"
                               onClick={() => setTeamPerfDateFilter('week')}
@@ -5376,6 +5437,15 @@ export default function AdminDashboard() {
                                   case 'yesterday':
                                     const yesterdayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1);
                                     return dateUTC === yesterdayUTC;
+                                  
+                                  case 'thisWeek': {
+                                    // Current week Monday to Saturday
+                                    const dayOfWeek = now.getDay();
+                                    const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+                                    const mondayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysFromMonday);
+                                    const saturdayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysFromMonday + 5);
+                                    return dateUTC >= mondayUTC && dateUTC <= saturdayUTC;
+                                  }
                                   
                                   case 'week':
                                     const weekAgoUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6);
