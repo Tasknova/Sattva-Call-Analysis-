@@ -2870,11 +2870,11 @@ Please provide insights that are specific, actionable, and tailored to these met
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {/* Last 7 Days Calls */}
                 <Card className="bg-white shadow-sm">
-                  <CardHeader>
+                  <CardHeader className="pb-2">
                     <CardTitle className="text-base font-semibold">Last 7 Days Calls</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="h-48">
+                    <div className="h-64">
                       <ResponsiveContainer width="100%" height="100%">
                         <RechartsBarChart
                           data={(() => {
@@ -2934,12 +2934,12 @@ Please provide insights that are specific, actionable, and tailored to these met
                 </Card>
 
                 {/* Additional Metrics */}
-                <div className="space-y-4">
+                <div className="flex flex-col justify-between h-full">
                   {/* First Row: Busy Calls and Failed Calls */}
                   <div className="grid grid-cols-2 gap-4">
                     {/* Busy Calls */}
                     <Card 
-                      className="bg-white shadow-sm hover:shadow-md transition-shadow cursor-pointer hover:bg-gray-50"
+                      className="bg-white shadow-sm hover:shadow-md transition-shadow cursor-pointer hover:bg-gray-50 h-[156px] flex flex-col justify-center"
                       onClick={() => {
                         setSelectedTab('calls');
                         setCallDateFilter(
@@ -2961,7 +2961,7 @@ Please provide insights that are specific, actionable, and tailored to these met
 
                     {/* Failed Calls */}
                     <Card 
-                      className="bg-white shadow-sm hover:shadow-md transition-shadow cursor-pointer hover:bg-gray-50"
+                      className="bg-white shadow-sm hover:shadow-md transition-shadow cursor-pointer hover:bg-gray-50 h-[156px] flex flex-col justify-center"
                       onClick={() => {
                         setSelectedTab('calls');
                         setCallDateFilter(
@@ -2986,7 +2986,7 @@ Please provide insights that are specific, actionable, and tailored to these met
                   <div className="grid grid-cols-2 gap-4">
                     {/* Relevant Calls */}
                     <Card 
-                      className="bg-white shadow-sm hover:shadow-md transition-shadow cursor-pointer hover:bg-gray-50"
+                      className="bg-white shadow-sm hover:shadow-md transition-shadow cursor-pointer hover:bg-gray-50 h-[156px] flex flex-col justify-center"
                       onClick={() => {
                         setSelectedTab('calls');
                         setCallDateFilter(
@@ -3014,7 +3014,7 @@ Please provide insights that are specific, actionable, and tailored to these met
 
                     {/* Irrelevant Calls */}
                     <Card 
-                      className="bg-white shadow-sm hover:shadow-md transition-shadow cursor-pointer hover:bg-gray-50"
+                      className="bg-white shadow-sm hover:shadow-md transition-shadow cursor-pointer hover:bg-gray-50 h-[156px] flex flex-col justify-center"
                       onClick={() => {
                         setSelectedTab('calls');
                         setCallDateFilter(
@@ -3045,7 +3045,7 @@ Please provide insights that are specific, actionable, and tailored to these met
 
               {/* Row 4: Additional Stats - Single Row */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {dateFilter !== 'today' ? (
+                {dateFilter !== 'today' && dateFilter !== 'yesterday' ? (
                   <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
                     <CardContent className="pt-6 pb-6">
                       <div className="flex items-center justify-between">
@@ -3063,7 +3063,28 @@ Please provide insights that are specific, actionable, and tailored to these met
                     </CardContent>
                   </Card>
                 ) : (
-                  <div></div>
+                  <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
+                    <CardContent className="pt-6 pb-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-gray-600 mb-1">Total Talk Time</p>
+                          <p className="text-2xl md:text-3xl font-bold text-purple-600 break-words">
+                            {(() => {
+                              const totalSeconds = dateFilteredCalls.reduce((sum, c) => sum + (c.exotel_duration || 0), 0);
+                              const hours = Math.floor(totalSeconds / 3600);
+                              const minutes = Math.floor((totalSeconds % 3600) / 60);
+                              const seconds = totalSeconds % 60;
+                              if (hours > 0) {
+                                return `${hours}h ${minutes}m`;
+                              }
+                              return `${minutes}m ${seconds}s`;
+                            })()}
+                          </p>
+                        </div>
+                        <Clock className="h-8 w-8 text-purple-600" />
+                      </div>
+                    </CardContent>
+                  </Card>
                 )}
 
                 <Card className="bg-white shadow-sm hover:shadow-md transition-shadow">
