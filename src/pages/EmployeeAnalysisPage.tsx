@@ -1,13 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, Eye, Search, Filter, TrendingUp, TrendingDown, Minus, AlertCircle, CheckCircle2, BarChart3, Calendar } from "lucide-react";
+import { Loader2, Eye, Search, Filter, TrendingUp, TrendingDown, Minus, AlertCircle, CheckCircle2, BarChart3, Calendar, CalendarDays } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import { format, isToday, isYesterday, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval, parseISO, startOfDay, endOfDay } from "date-fns";
 
 interface Analysis {
   id: string;
@@ -41,6 +44,9 @@ export default function EmployeeAnalysisPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState<'date' | 'closure'>('date');
+  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'yesterday' | 'this_week' | 'this_month' | 'specific'>('all');
+  const [specificDate, setSpecificDate] = useState<Date | undefined>(undefined);
+  const [calendarOpen, setCalendarOpen] = useState(false);
 
   useEffect(() => {
     const fetchAnalyses = async () => {
@@ -160,22 +166,63 @@ export default function EmployeeAnalysisPage() {
   }, [user?.id]);
 
   // Filter and sort analyses
-  const filteredAnalyses = analyses
-    .filter((analysis) => {
-      // Search filter
-      const leadName = analysis.call_history?.leads?.name?.toLowerCase() || '';
-      const matchesSearch = leadName.includes(searchTerm.toLowerCase());
+  const filteredAnalyses = useMemo(() => {
+    return analyses
+      .filter((analysis) => {
+        // Search filter
+        const leadName = analysis.call_history?.leads?.name?.toLowerCase() || '';
+        const matchesSearch = leadName.includes(searchTerm.toLowerCase());
 
-      return matchesSearch;
-    })
-    .sort((a, b) => {
-      if (sortBy === 'date') {
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-      } else if (sortBy === 'closure') {
-        return (b.closure_probability || 0) - (a.closure_probability || 0);
-      }
-      return 0;
-    });
+        // Date filter
+        let matchesDate = true;
+        const analysisDate = analysis.created_at ? new Date(analysis.created_at) : null;
+        
+        if (analysisDate) {
+          const today = new Date();
+          
+          switch (dateFilter) {
+            case 'today':
+              matchesDate = isToday(analysisDate);
+              break;
+            case 'yesterday':
+              matchesDate = isYesterday(analysisDate);
+              break;
+            case 'this_week':
+              matchesDate = isWithinInterval(analysisDate, {
+                start: startOfWeek(today, { weekStartsOn: 1 }),
+                end: endOfWeek(today, { weekStartsOn: 1 })
+              });
+              break;
+            case 'this_month':
+              matchesDate = isWithinInterval(analysisDate, {
+                start: startOfMonth(today),
+                end: endOfMonth(today)
+              });
+              break;
+            case 'specific':
+              if (specificDate) {
+                matchesDate = isWithinInterval(analysisDate, {
+                  start: startOfDay(specificDate),
+                  end: endOfDay(specificDate)
+                });
+              }
+              break;
+            default:
+              matchesDate = true;
+          }
+        }
+
+        return matchesSearch && matchesDate;
+      })
+      .sort((a, b) => {
+        if (sortBy === 'date') {
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        } else if (sortBy === 'closure') {
+          return (b.closure_probability || 0) - (a.closure_probability || 0);
+        }
+        return 0;
+      });
+  }, [analyses, searchTerm, dateFilter, specificDate, sortBy]);
 
   // Calculate statistics
   const totalAnalyses = analyses.length;
@@ -206,7 +253,7 @@ export default function EmployeeAnalysisPage() {
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="px-3 py-1">
             <BarChart3 className="h-3 w-3 mr-1" />
-            {totalAnalyses} Total
+            Total Records - {filteredAnalyses.length}
           </Badge>
         </div>
       </div>
@@ -261,36 +308,123 @@ export default function EmployeeAnalysisPage() {
       {/* Filters and Search */}
       <Card>
         <CardContent className="pt-6">
-          <div className="flex flex-col md:flex-row gap-4">
-            {/* Search */}
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                placeholder="Search by lead name..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
+          <div className="flex flex-col gap-4">
+            {/* Search and Sort Row */}
+            <div className="flex flex-col md:flex-row gap-4">
+              {/* Search */}
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  placeholder="Search by lead name..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+
+              {/* Sort */}
+              <div className="flex gap-2">
+                <Button
+                  variant={sortBy === 'date' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setSortBy('date')}
+                >
+                  <Calendar className="h-3 w-3 mr-1" />
+                  Date
+                </Button>
+                <Button
+                  variant={sortBy === 'closure' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setSortBy('closure')}
+                >
+                  <TrendingUp className="h-3 w-3 mr-1" />
+                  Closure
+                </Button>
+              </div>
             </div>
 
-            {/* Sort */}
-            <div className="flex gap-2">
+            {/* Date Filters Row */}
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-sm font-medium text-gray-600 mr-2">
+                <CalendarDays className="h-4 w-4 inline mr-1" />
+                Filter by:
+              </span>
               <Button
-                variant={sortBy === 'date' ? 'default' : 'outline'}
+                variant={dateFilter === 'all' ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => setSortBy('date')}
+                onClick={() => {
+                  setDateFilter('all');
+                  setSpecificDate(undefined);
+                }}
               >
-                <Calendar className="h-3 w-3 mr-1" />
-                Date
+                All
               </Button>
               <Button
-                variant={sortBy === 'closure' ? 'default' : 'outline'}
+                variant={dateFilter === 'today' ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => setSortBy('closure')}
+                onClick={() => {
+                  setDateFilter('today');
+                  setSpecificDate(undefined);
+                }}
               >
-                <TrendingUp className="h-3 w-3 mr-1" />
-                Closure
+                Today
               </Button>
+              <Button
+                variant={dateFilter === 'yesterday' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => {
+                  setDateFilter('yesterday');
+                  setSpecificDate(undefined);
+                }}
+              >
+                Yesterday
+              </Button>
+              <Button
+                variant={dateFilter === 'this_week' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => {
+                  setDateFilter('this_week');
+                  setSpecificDate(undefined);
+                }}
+              >
+                This Week
+              </Button>
+              <Button
+                variant={dateFilter === 'this_month' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => {
+                  setDateFilter('this_month');
+                  setSpecificDate(undefined);
+                }}
+              >
+                This Month
+              </Button>
+              <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant={dateFilter === 'specific' ? 'default' : 'outline'}
+                    size="sm"
+                    className="min-w-[120px]"
+                  >
+                    <CalendarDays className="h-3 w-3 mr-1" />
+                    {dateFilter === 'specific' && specificDate 
+                      ? format(specificDate, 'MMM dd, yyyy')
+                      : 'Pick Date'}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent
+                    mode="single"
+                    selected={specificDate}
+                    onSelect={(date) => {
+                      setSpecificDate(date);
+                      setDateFilter('specific');
+                      setCalendarOpen(false);
+                    }}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
         </CardContent>
