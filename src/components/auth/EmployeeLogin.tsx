@@ -89,6 +89,7 @@ export default function EmployeeLogin({ onComplete, onBack }: EmployeeLoginProps
                   <Input
                     id="email"
                     type="email"
+                    autoComplete="off"
                     value={formData.email}
                     onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
                     placeholder="Enter your email address"
@@ -107,6 +108,7 @@ export default function EmployeeLogin({ onComplete, onBack }: EmployeeLoginProps
                   <Input
                     id="password"
                     type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
                     value={formData.password}
                     onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
                     placeholder="Enter your password"

@@ -283,15 +283,16 @@ export default function LandingPage({ onGetStarted, onLogin, onSignup }: Landing
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <Card className="border-2 border-blue-200 bg-blue-50/50 hover:shadow-lg transition-all">
+            {/* Admin Card */}
+            <Card className="border-2 border-blue-200 bg-blue-50/50 hover:shadow-lg transition-all flex flex-col h-full">
               <CardHeader>
                 <div className="h-14 w-14 bg-blue-500 rounded-full flex items-center justify-center mb-3 mx-auto">
                   <Shield className="h-7 w-7 text-white" />
                 </div>
                 <CardTitle className="text-2xl text-center">Admin</CardTitle>
               </CardHeader>
-              <CardContent>
-                <ul className="space-y-2 text-sm text-gray-700">
+              <CardContent className="flex flex-col justify-between min-h-[260px]">
+                <ul className="space-y-2 text-sm text-gray-700 mb-6">
                   <li className="flex items-start">
                     <CheckCircle className="h-4 w-4 text-blue-500 mr-2 mt-0.5 flex-shrink-0" />
                     <span>Complete system oversight and control</span>
@@ -309,18 +310,21 @@ export default function LandingPage({ onGetStarted, onLogin, onSignup }: Landing
                     <span>System configuration and settings</span>
                   </li>
                 </ul>
+                <div className="flex flex-row gap-2 w-full justify-center">
+                  <Button className="w-full max-w-[140px]" size="lg" variant="outline">Admin Login</Button>
+                </div>
               </CardContent>
             </Card>
-
-            <Card className="border-2 border-green-200 bg-green-50/50 hover:shadow-lg transition-all">
+            {/* Manager Card */}
+            <Card className="border-2 border-green-200 bg-green-50/50 hover:shadow-lg transition-all flex flex-col h-full">
               <CardHeader>
                 <div className="h-14 w-14 bg-green-500 rounded-full flex items-center justify-center mb-3 mx-auto">
                   <UserCog className="h-7 w-7 text-white" />
                 </div>
                 <CardTitle className="text-2xl text-center">Manager</CardTitle>
               </CardHeader>
-              <CardContent>
-                <ul className="space-y-2 text-sm text-gray-700">
+              <CardContent className="flex flex-col justify-between min-h-[260px]">
+                <ul className="space-y-2 text-sm text-gray-700 mb-6">
                   <li className="flex items-start">
                     <CheckCircle className="h-4 w-4 text-green-500 mr-2 mt-0.5 flex-shrink-0" />
                     <span>Manage and assign leads to employees</span>
@@ -338,25 +342,28 @@ export default function LandingPage({ onGetStarted, onLogin, onSignup }: Landing
                     <span>Track conversion metrics</span>
                   </li>
                 </ul>
+                <div className="flex flex-row gap-2 w-full justify-center">
+                  <Button className="w-full max-w-[140px]" size="lg" variant="outline">Manager Login</Button>
+                </div>
               </CardContent>
             </Card>
-
-            <Card className="border-2 border-purple-200 bg-purple-50/50 hover:shadow-lg transition-all">
+            {/* Employee Card */}
+            <Card className="border-2 border-purple-200 bg-purple-50/50 hover:shadow-lg transition-all flex flex-col h-full">
               <CardHeader>
                 <div className="h-14 w-14 bg-purple-500 rounded-full flex items-center justify-center mb-3 mx-auto">
                   <Users className="h-7 w-7 text-white" />
                 </div>
                 <CardTitle className="text-2xl text-center">Employee</CardTitle>
               </CardHeader>
-              <CardContent>
-                <ul className="space-y-2 text-sm text-gray-700">
+              <CardContent className="flex flex-col justify-between min-h-[260px]">
+                <ul className="space-y-2 text-sm text-gray-700 mb-6">
                   <li className="flex items-start">
                     <CheckCircle className="h-4 w-4 text-purple-500 mr-2 mt-0.5 flex-shrink-0" />
                     <span>Access assigned leads and groups</span>
                   </li>
                   <li className="flex items-start">
                     <CheckCircle className="h-4 w-4 text-purple-500 mr-2 mt-0.5 flex-shrink-0" />
-                    <span>Make calls directly from platform</span>
+                    <span className="whitespace-nowrap text-balance">Make calls directly from platform</span>
                   </li>
                   <li className="flex items-start">
                     <CheckCircle className="h-4 w-4 text-purple-500 mr-2 mt-0.5 flex-shrink-0" />
@@ -367,6 +374,9 @@ export default function LandingPage({ onGetStarted, onLogin, onSignup }: Landing
                     <span>Track personal performance</span>
                   </li>
                 </ul>
+                <div className="flex flex-row gap-2 w-full justify-center">
+                  <Button className="w-full max-w-[140px]" size="lg" variant="outline">Employee Login</Button>
+                </div>
               </CardContent>
             </Card>
           </div>

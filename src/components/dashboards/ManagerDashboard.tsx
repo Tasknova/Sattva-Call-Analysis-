@@ -188,7 +188,7 @@ export default function ManagerDashboard() {
   const [csvAssignedTo, setCsvAssignedTo] = useState<string>('unassigned');
   const [isCredentialsModalOpen, setIsCredentialsModalOpen] = useState(false);
   const [isSignOutDialogOpen, setIsSignOutDialogOpen] = useState(false);
-  const [dateRangeFilter, setDateRangeFilter] = useState<'today' | 'yesterday' | 'thisWeek' | 'week' | 'month' | 'custom'>('thisWeek');
+  const [dateRangeFilter, setDateRangeFilter] = useState<'today' | 'yesterday' | 'thisWeek' | 'week' | 'month' | 'custom'>('today');
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
   const [callDateFilter, setCallDateFilter] = useState<string>('all');

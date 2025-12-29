@@ -395,22 +395,16 @@ export default function JobsPage({ managerId, readOnly = false }: JobsPageProps 
                   <TableRow>
                     <TableHead>Job Title</TableHead>
                     <TableHead>Client</TableHead>
-                    <TableHead>Location</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Positions</TableHead>
                     <TableHead>Status</TableHead>
                     {!managerId && <TableHead className="w-[50px]">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
-                <TableBody>
-                  {filteredJobs.map((job) => (
-                    <TableRow key={job.id}>
-                      <TableCell className="font-medium">
-                        <div className="flex items-center gap-2">
-                          <Briefcase className="h-4 w-4 text-muted-foreground" />
-                          <div>
-                            <div>{job.title}</div>
-                            <div className="text-xs text-muted-foreground">
+                  <TableRow>
+                    <TableHead>Job Title</TableHead>
+                    <TableHead>Client</TableHead>
+                    <TableHead>Status</TableHead>
+                    {!managerId && <TableHead className="w-[50px]">Actions</TableHead>}
+                  </TableRow>
                               {job.experience_level && (
                                 <span className="capitalize">{job.experience_level} level</span>
                               )}
@@ -424,20 +418,6 @@ export default function JobsPage({ managerId, readOnly = false }: JobsPageProps 
                           {job.clients?.name || "-"}
                         </div>
                       </TableCell>
-                      <TableCell>
-                        {job.location ? (
-                          <div className="flex items-center gap-2">
-                            <MapPin className="h-4 w-4 text-muted-foreground" />
-                            {job.location}
-                          </div>
-                        ) : "-"}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="capitalize">
-                          {job.employment_type?.replace("-", " ") || "-"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{job.positions_available}</TableCell>
                       <TableCell>{getStatusBadge(job.status)}</TableCell>
                       {!managerId && (
                         <TableCell>
@@ -621,49 +601,52 @@ export default function JobsPage({ managerId, readOnly = false }: JobsPageProps 
           <DialogFooter>
             <Button 
               variant="outline" 
-              onClick={() => {
-                setIsAddModalOpen(false);
-                setEditingJob(null);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button 
-              onClick={editingJob ? handleUpdateJob : handleCreateJob}
-              disabled={createJob.isPending || updateJob.isPending}
-            >
-              {(createJob.isPending || updateJob.isPending) ? "Saving..." : editingJob ? "Update Job" : "Add Job"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={!!deletingJob} onOpenChange={() => setDeletingJob(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Job</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete "{deletingJob?.title}"? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button 
-              variant="outline" 
-              onClick={() => setDeletingJob(null)}
-            >
-              Cancel
-            </Button>
-            <Button 
-              variant="destructive" 
-              onClick={() => deletingJob && handleDeleteJob(deletingJob)}
-              disabled={deleteJob.isPending}
-            >
-              {deleteJob.isPending ? "Deleting..." : "Delete"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
+                  {filteredJobs.map((job) => (
+                    <TableRow key={job.id}>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          <Briefcase className="h-4 w-4 text-muted-foreground" />
+                          <div>
+                            <div>{job.title}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {job.experience_level && (
+                                <span className="capitalize">{job.experience_level} level</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Building2 className="h-4 w-4 text-muted-foreground" />
+                          {job.clients?.name || "-"}
+                        </div>
+                      </TableCell>
+                      <TableCell>{getStatusBadge(job.status)}</TableCell>
+                      {!managerId && (
+                        <TableCell>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => handleOpenEditModal(job)}>
+                                <Edit className="h-4 w-4 mr-2" />
+                                Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem 
+                                onClick={() => setDeletingJob(job)}
+                                className="text-destructive"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  ))}
 }

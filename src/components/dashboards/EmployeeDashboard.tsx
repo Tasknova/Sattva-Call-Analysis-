@@ -2499,7 +2499,7 @@ Please provide insights that are specific, actionable, and tailored to these met
                       setShowCustomDatePicker(false);
                     }}
                   >
-                    This Week
+                    Last 7 Days 
                   </Button>
                   <Button 
                     variant={dateFilter === 'month' ? 'default' : 'outline'} 
@@ -3053,8 +3053,24 @@ Please provide insights that are specific, actionable, and tailored to these met
                           <p className="text-sm text-gray-600 mb-1">Avg Calls per Day</p>
                           <p className="text-2xl md:text-3xl font-bold text-gray-900 break-words">
                             {(() => {
-                              const uniqueDays = new Set(dateFilteredCalls.map(c => new Date(c.created_at).toISOString().split('T')[0]));
-                              return uniqueDays.size > 0 ? (dateFilteredCalls.length / uniqueDays.size).toFixed(1) : 0;
+                              // For 'month' filter, use working days (Mon-Fri) as denominator
+                              if (dateFilter === 'month') {
+                                const now = new Date();
+                                const year = now.getFullYear();
+                                const month = now.getMonth();
+                                // First and last day of this month up to today
+                                const firstDay = new Date(year, month, 1);
+                                const lastDay = now;
+                                let workingDays = 0;
+                                for (let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate() + 1)) {
+                                  const day = d.getDay();
+                                  if (day !== 0 && day !== 6) workingDays++; // 0=Sun, 6=Sat
+                                }
+                                return workingDays > 0 ? Math.round(dateFilteredCalls.length / workingDays) : 0;
+                              } else {
+                                const uniqueDays = new Set(dateFilteredCalls.map(c => new Date(c.created_at).toISOString().split('T')[0]));
+                                return uniqueDays.size > 0 ? Math.round(dateFilteredCalls.length / uniqueDays.size) : 0;
+                              }
                             })()}
                           </p>
                         </div>
