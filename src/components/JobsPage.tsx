@@ -399,12 +399,15 @@ export default function JobsPage({ managerId, readOnly = false }: JobsPageProps 
                     {!managerId && <TableHead className="w-[50px]">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
-                  <TableRow>
-                    <TableHead>Job Title</TableHead>
-                    <TableHead>Client</TableHead>
-                    <TableHead>Status</TableHead>
-                    {!managerId && <TableHead className="w-[50px]">Actions</TableHead>}
-                  </TableRow>
+                <TableBody>
+                  {filteredJobs.map((job) => (
+                    <TableRow key={job.id}>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          <Briefcase className="h-4 w-4 text-muted-foreground" />
+                          <div>
+                            <div>{job.title}</div>
+                            <div className="text-xs text-muted-foreground">
                               {job.experience_level && (
                                 <span className="capitalize">{job.experience_level} level</span>
                               )}
@@ -601,52 +604,21 @@ export default function JobsPage({ managerId, readOnly = false }: JobsPageProps 
           <DialogFooter>
             <Button 
               variant="outline" 
-                  {filteredJobs.map((job) => (
-                    <TableRow key={job.id}>
-                      <TableCell className="font-medium">
-                        <div className="flex items-center gap-2">
-                          <Briefcase className="h-4 w-4 text-muted-foreground" />
-                          <div>
-                            <div>{job.title}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {job.experience_level && (
-                                <span className="capitalize">{job.experience_level} level</span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Building2 className="h-4 w-4 text-muted-foreground" />
-                          {job.clients?.name || "-"}
-                        </div>
-                      </TableCell>
-                      <TableCell>{getStatusBadge(job.status)}</TableCell>
-                      {!managerId && (
-                        <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm">
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handleOpenEditModal(job)}>
-                                <Edit className="h-4 w-4 mr-2" />
-                                Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuItem 
-                                onClick={() => setDeletingJob(job)}
-                                className="text-destructive"
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
-                      )}
-                    </TableRow>
-                  ))}
+              onClick={() => {
+                setIsAddModalOpen(false);
+                setEditingJob(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={editingJob ? handleUpdateJob : handleCreateJob}
+            >
+              {editingJob ? "Update Job" : "Create Job"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
 }
