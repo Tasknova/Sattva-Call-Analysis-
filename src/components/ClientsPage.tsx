@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,9 +38,11 @@ import {
   Users,
   Mail,
   Phone,
-  Globe
+  Globe,
+  ChevronLeft,
+  Briefcase
 } from "lucide-react";
-import { useClients, useCreateClient, useUpdateClient, useDeleteClient, useManagerClientAssignments } from "@/hooks/useSupabaseData";
+import { useClients, useCreateClient, useUpdateClient, useDeleteClient, useManagerClientAssignments, useJobs } from "@/hooks/useSupabaseData";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { Client } from "@/lib/supabase";
@@ -51,13 +54,16 @@ interface ClientsPageProps {
 
 export default function ClientsPage({ managerId, readOnly = false }: ClientsPageProps = {}) {
   const { company } = useAuth();
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [deletingClient, setDeletingClient] = useState<Client | null>(null);
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   
   const { data: allClients, isLoading, error } = useClients();
+  const { data: allJobs } = useJobs();
   
   console.log('ClientsPage - managerId:', managerId);
   console.log('ClientsPage - allClients:', allClients);
@@ -236,6 +242,109 @@ export default function ClientsPage({ managerId, readOnly = false }: ClientsPage
     );
   }
 
+  // Get jobs for the selected client
+  const selectedClientJobs = selectedClient ? allJobs?.filter(job => job.client_id === selectedClient.id) : [];
+
+  // If a client is selected, show the jobs view
+  if (selectedClient) {
+    return (
+      <div className="space-y-6">
+        {/* Header with back button */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelectedClient(null)}
+              className="gap-2"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Back to Clients
+            </Button>
+            <div>
+              <h1 className="text-3xl font-bold text-foreground">Jobs for {selectedClient.name}</h1>
+              <p className="text-muted-foreground">
+                {selectedClientJobs?.length || 0} job{selectedClientJobs?.length !== 1 ? 's' : ''} available
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Jobs List */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Active Jobs</CardTitle>
+            <CardDescription>
+              Click on a job to view its call history
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {!selectedClientJobs || selectedClientJobs.length === 0 ? (
+              <div className="text-center py-8">
+                <Briefcase className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No jobs found</h3>
+                <p className="text-muted-foreground">
+                  No active jobs for this client.
+                </p>
+              </div>
+            ) : (
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Job Title</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Location</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedClientJobs.map((job) => (
+                      <TableRow 
+                        key={job.id}
+                        className="cursor-pointer hover:bg-muted/50"
+                      >
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <Briefcase className="h-4 w-4 text-muted-foreground" />
+                            {job.title}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">
+                            {job.employment_type}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{job.location || "-"}</TableCell>
+                        <TableCell>
+                          <Badge variant={job.is_active ? "default" : "secondary"}>
+                            {job.is_active ? "Active" : "Inactive"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              // Navigate to dashboard call-history with job filter
+                              navigate(`/?tab=call-history&jobFilter=${job.id}`);
+                            }}
+                          >
+                            View Calls
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -357,8 +466,14 @@ export default function ClientsPage({ managerId, readOnly = false }: ClientsPage
                 </TableHeader>
                 <TableBody>
                   {paginatedClients.map((client) => (
-                    <TableRow key={client.id}>
-                      <TableCell className="font-medium">
+                    <TableRow 
+                      key={client.id}
+                      className="cursor-pointer hover:bg-muted/50 transition-colors"
+                    >
+                      <TableCell 
+                        className="font-medium"
+                        onClick={() => setSelectedClient(client)}
+                      >
                         <div className="flex items-center gap-2">
                           <Building2 className="h-4 w-4 text-muted-foreground" />
                           {client.name}

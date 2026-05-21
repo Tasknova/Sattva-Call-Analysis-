@@ -21,19 +21,23 @@ import { Analysis } from "@/lib/supabase";
 
 interface DashboardProps {
   onShowProfile?: () => void;
+  initialTab?: string;
+  jobFilterId?: string;
 }
 
-export default function Dashboard({ onShowProfile }: DashboardProps) {
+export default function Dashboard({ onShowProfile, initialTab, jobFilterId }: DashboardProps) {
   const { userRole } = useAuth();
   
   // Debug logging
   console.log('Dashboard - userRole:', userRole);
   console.log('Dashboard - userRole?.role:', userRole?.role);
+  console.log('Dashboard - initialTab:', initialTab);
+  console.log('Dashboard - jobFilterId:', jobFilterId);
   
   // Route to appropriate dashboard based on user role
   if (userRole?.role === 'admin') {
     console.log('Routing to AdminDashboard');
-    return <AdminDashboard />;
+    return <AdminDashboard initialTab={initialTab} jobFilterId={jobFilterId} />;
   }
   
   if (userRole?.role === 'manager') {

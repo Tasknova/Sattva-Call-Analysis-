@@ -6,6 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { format } from "date-fns";
 import { 
   Users, 
   Phone, 
@@ -60,7 +63,8 @@ interface AnalysisStats {
 export default function AdminReportsPage() {
   const { userRole, company } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'this_week' | 'this_month' | 'custom'>('this_month');
+  const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'thisWeek' | 'prevweek' | 'month' | 'custom'>('prevweek');
+  const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
   const [customDateRange, setCustomDateRange] = useState({ startDate: '', endDate: '' });
   const [managers, setManagers] = useState<Manager[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -108,13 +112,29 @@ export default function AdminReportsPage() {
       yesterday.setDate(now.getDate() - 1);
       startDateStr = formatDateStr(yesterday);
       endDateStr = formatDateStr(yesterday);
-    } else if (dateFilter === 'this_week') {
-      // Last 7 days including today
-      const weekAgo = new Date(now);
-      weekAgo.setDate(now.getDate() - 6);
-      startDateStr = formatDateStr(weekAgo);
-      endDateStr = formatDateStr(now);
-    } else if (dateFilter === 'this_month') {
+    } else if (dateFilter === 'thisWeek') {
+      // Monday to Sunday of current week
+      const dayOfWeek = now.getDay();
+      const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - daysFromMonday);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      startDateStr = formatDateStr(weekStart);
+      endDateStr = formatDateStr(weekEnd);
+    } else if (dateFilter === 'prevweek') {
+      // Previous week Monday to Sunday
+      const dayOfWeek = now.getDay();
+      const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      const currentWeekStart = new Date(now);
+      currentWeekStart.setDate(now.getDate() - daysFromMonday);
+      const prevWeekStart = new Date(currentWeekStart);
+      prevWeekStart.setDate(currentWeekStart.getDate() - 7);
+      const prevWeekEnd = new Date(prevWeekStart);
+      prevWeekEnd.setDate(prevWeekStart.getDate() + 6);
+      startDateStr = formatDateStr(prevWeekStart);
+      endDateStr = formatDateStr(prevWeekEnd);
+    } else if (dateFilter === 'month') {
       // First day of current month to last day of current month
       const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
       startDateStr = formatDateStr(firstDayOfMonth);
@@ -124,11 +144,17 @@ export default function AdminReportsPage() {
       startDateStr = customDateRange.startDate;
       endDateStr = customDateRange.endDate;
     } else {
-      // Default to this month
-      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      startDateStr = formatDateStr(firstDayOfMonth);
-      const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      endDateStr = formatDateStr(lastDayOfMonth);
+      // Default to previous week
+      const dayOfWeek = now.getDay();
+      const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      const currentWeekStart = new Date(now);
+      currentWeekStart.setDate(now.getDate() - daysFromMonday);
+      const prevWeekStart = new Date(currentWeekStart);
+      prevWeekStart.setDate(currentWeekStart.getDate() - 7);
+      const prevWeekEnd = new Date(prevWeekStart);
+      prevWeekEnd.setDate(prevWeekStart.getDate() + 6);
+      startDateStr = formatDateStr(prevWeekStart);
+      endDateStr = formatDateStr(prevWeekEnd);
     }
 
     return { startDate: startDateStr, endDate: endDateStr };
@@ -528,44 +554,140 @@ export default function AdminReportsPage() {
       <Card>
         <CardContent className="pt-6">
           <div className="flex flex-col gap-4">
-            <div className="flex items-center gap-4">
-              <div className="flex-1">
-                <label className="text-sm font-medium mb-2 block">Time Period</label>
-                <Select value={dateFilter} onValueChange={(value: any) => setDateFilter(value)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="today">Today</SelectItem>
-                    <SelectItem value="yesterday">Yesterday</SelectItem>
-                    <SelectItem value="this_week">Last 7 days</SelectItem>
-                    <SelectItem value="this_month">This Month</SelectItem>
-                    <SelectItem value="custom">Custom Range</SelectItem>
-                  </SelectContent>
-                </Select>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Calendar className="h-5 w-5 text-gray-600" />
+                <span className="text-sm font-semibold text-gray-700">Date Range:</span>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  variant={dateFilter === 'today' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => {
+                    setDateFilter('today');
+                    setShowCustomDatePicker(false);
+                  }}
+                >
+                  Today
+                </Button>
+                <Button
+                  variant={dateFilter === 'yesterday' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => {
+                    setDateFilter('yesterday');
+                    setShowCustomDatePicker(false);
+                  }}
+                >
+                  Yesterday
+                </Button>
+                <Button
+                  variant={dateFilter === 'thisWeek' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => {
+                    setDateFilter('thisWeek');
+                    setShowCustomDatePicker(false);
+                  }}
+                >
+                  This Week
+                </Button>
+                <Button
+                  variant={dateFilter === 'prevweek' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => {
+                    setDateFilter('prevweek');
+                    setShowCustomDatePicker(false);
+                  }}
+                >
+                  Previous Week
+                </Button>
+                <Button
+                  variant={dateFilter === 'month' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => {
+                    setDateFilter('month');
+                    setShowCustomDatePicker(false);
+                  }}
+                >
+                  This Month
+                </Button>
+                <Button
+                  variant={dateFilter === 'custom' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => {
+                    setDateFilter('custom');
+                    setShowCustomDatePicker(!showCustomDatePicker);
+                  }}
+                >
+                  Custom Range
+                </Button>
               </div>
             </div>
-            {dateFilter === 'custom' && (
-              <div className="flex items-center gap-4">
-                <div className="flex-1">
-                  <label className="text-sm font-medium mb-2 block">Start Date</label>
-                  <input
-                    type="date"
-                    value={customDateRange.startDate}
-                    onChange={(e) => setCustomDateRange(prev => ({ ...prev, startDate: e.target.value }))}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    max={new Date().toISOString().split('T')[0]}
-                  />
-                </div>
-                <div className="flex-1">
-                  <label className="text-sm font-medium mb-2 block">End Date</label>
-                  <input
-                    type="date"
-                    value={customDateRange.endDate}
-                    onChange={(e) => setCustomDateRange(prev => ({ ...prev, endDate: e.target.value }))}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    max={new Date().toISOString().split('T')[0]}
-                  />
+
+            {/* Date Range Display */}
+            <div className="text-sm text-gray-600">
+              {(() => {
+                const now = new Date();
+
+                if (dateFilter === 'today') {
+                  return `Date Range: ${format(now, 'MMM dd, yyyy')} (Today)`;
+                } else if (dateFilter === 'yesterday') {
+                  const yesterday = new Date(now);
+                  yesterday.setDate(yesterday.getDate() - 1);
+                  return `Date Range: ${format(yesterday, 'MMM dd, yyyy')} (Yesterday)`;
+                } else if (dateFilter === 'thisWeek') {
+                  const dayOfWeek = now.getDay();
+                  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+                  const weekStart = new Date(now);
+                  weekStart.setDate(now.getDate() - daysFromMonday);
+                  const weekEnd = new Date(weekStart);
+                  weekEnd.setDate(weekStart.getDate() + 6);
+                  return `Date Range: ${format(weekStart, 'MMM dd')} - ${format(weekEnd, 'MMM dd, yyyy')} (This Week)`;
+                } else if (dateFilter === 'prevweek') {
+                  const dayOfWeek = now.getDay();
+                  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+                  const currentWeekStart = new Date(now);
+                  currentWeekStart.setDate(now.getDate() - daysFromMonday);
+                  const prevWeekStart = new Date(currentWeekStart);
+                  prevWeekStart.setDate(currentWeekStart.getDate() - 7);
+                  const prevWeekEnd = new Date(prevWeekStart);
+                  prevWeekEnd.setDate(prevWeekStart.getDate() + 6);
+                  return `Date Range: ${format(prevWeekStart, 'MMM dd')} - ${format(prevWeekEnd, 'MMM dd, yyyy')} (Previous Week)`;
+                } else if (dateFilter === 'month') {
+                  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                  return `Date Range: ${format(firstDayOfMonth, 'MMM dd')} - ${format(lastDayOfMonth, 'MMM dd, yyyy')} (This Month)`;
+                } else if (dateFilter === 'custom' && customDateRange.startDate && customDateRange.endDate) {
+                  return `Date Range: ${format(new Date(customDateRange.startDate), 'MMM dd, yyyy')} - ${format(new Date(customDateRange.endDate), 'MMM dd, yyyy')}`;
+                } else {
+                  return 'Date Range: All Time';
+                }
+              })()}
+            </div>
+
+            {/* Custom Date Range Picker */}
+            {showCustomDatePicker && dateFilter === 'custom' && (
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <div className="flex items-center gap-4">
+                  <div className="flex-1">
+                    <Label htmlFor="startDate" className="text-sm mb-1 block">Start Date</Label>
+                    <Input
+                      id="startDate"
+                      type="date"
+                      value={customDateRange.startDate}
+                      onChange={(e) => setCustomDateRange(prev => ({ ...prev, startDate: e.target.value }))}
+                      className="w-full"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <Label htmlFor="endDate" className="text-sm mb-1 block">End Date</Label>
+                    <Input
+                      id="endDate"
+                      type="date"
+                      value={customDateRange.endDate}
+                      onChange={(e) => setCustomDateRange(prev => ({ ...prev, endDate: e.target.value }))}
+                      className="w-full"
+                    />
+                  </div>
                 </div>
               </div>
             )}

@@ -71,7 +71,7 @@ import {
   ChevronRight,
   Download
 } from "lucide-react";
-import { Headphones, Link as LinkIcon } from 'lucide-react';
+import { Headphones, Link as LinkIcon, ChevronDown } from 'lucide-react';
 
 const UsersTab = lazy(() => import('./tabs/UsersTab'));
 const JobsTab = lazy(() => import('./tabs/JobsTab'));
@@ -114,7 +114,7 @@ const DEPARTMENT_OPTIONS = [
   { value: 'other', label: 'Other' }
 ];
 
-export default function AdminDashboard() {
+export default function AdminDashboard({ initialTab, jobFilterId }: { initialTab?: string; jobFilterId?: string } = {}) {
   const { user, userRole, company, signOut } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -171,13 +171,15 @@ export default function AdminDashboard() {
   const [addUserType, setAddUserType] = useState<'manager' | 'employee'>('manager');
   const [selectedClientFilter, setSelectedClientFilter] = useState<string>('all');
   const [selectedJobFilter, setSelectedJobFilter] = useState<string>('all');
+  const [clientFilterSearch, setClientFilterSearch] = useState<string>('');
+  const [jobFilterSearch, setJobFilterSearch] = useState<string>('');
   const [selectedEmployeeFilter, setSelectedEmployeeFilter] = useState<string>('all');
   const [analysisSearchTerm, setAnalysisSearchTerm] = useState("");
   const [selectedAnalysisEmployee, setSelectedAnalysisEmployee] = useState<string>("all");
   const [selectedClosureProbability, setSelectedClosureProbability] = useState<string>("all");
   const [selectedAnalysisStatus, setSelectedAnalysisStatus] = useState<string>('all');
   // Call history specific filters (match Manager dashboard)
-  const [callDateFilter, setCallDateFilter] = useState<'all' | 'today' | 'yesterday' | 'week' | 'month'>('all');
+  const [callDateFilter, setCallDateFilter] = useState<'all' | 'today' | 'yesterday' | 'prevweek' | 'month'>('all');
   const [selectedCallDate, setSelectedCallDate] = useState<Date | undefined>(undefined);
   const [callSearch, setCallSearch] = useState<string>('');
   const [callSortBy, setCallSortBy] = useState<'date' | 'duration' | 'agent'>('date');
@@ -199,6 +201,17 @@ export default function AdminDashboard() {
     // When manager filter changes, reset employee filter
     setSelectedEmployeeFilter('all');
   }, [selectedManagerFilter]);
+
+  // Handle initial tab and job filter from URL parameters
+  useEffect(() => {
+    if (initialTab && initialTab === 'call-history') {
+      setActiveSidebarItem('call-history');
+    }
+    if (jobFilterId) {
+      setSelectedJobFilter(jobFilterId);
+    }
+  }, [initialTab, jobFilterId]);
+
   const [selectedDepartmentFilter, setSelectedDepartmentFilter] = useState<string>('all');
   const [selectedManager, setSelectedManager] = useState<Manager | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -226,7 +239,7 @@ export default function AdminDashboard() {
   const [phoneAssignments, setPhoneAssignments] = useState<any[]>([]);
 
   // Date filter state
-  const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'thisWeek' | 'week' | 'month' | 'custom'>('thisWeek');
+  const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'thisWeek' | 'prevweek' | 'month' | 'custom'>('thisWeek');
   const [customDateRange, setCustomDateRange] = useState({
     startDate: '',
     endDate: ''
@@ -241,7 +254,7 @@ export default function AdminDashboard() {
   
   // Team Performance states
   const [selectedManagerForTeamPerf, setSelectedManagerForTeamPerf] = useState<string>('');
-  const [teamPerfDateFilter, setTeamPerfDateFilter] = useState<'today' | 'yesterday' | 'thisWeek' | 'week' | 'month' | 'custom'>('today');
+  const [teamPerfDateFilter, setTeamPerfDateFilter] = useState<'today' | 'yesterday' | 'thisWeek' | 'prevweek' | 'month' | 'custom'>('prevweek');
   const [teamPerfCustomStartDate, setTeamPerfCustomStartDate] = useState<string>('');
   const [teamPerfCustomEndDate, setTeamPerfCustomEndDate] = useState<string>('');
   const [teamPerfEmployeeFilter, setTeamPerfEmployeeFilter] = useState<string>('all');
@@ -697,7 +710,7 @@ export default function AdminDashboard() {
       while (hasMore) {
         const { data, error } = await supabase
           .from('call_history')
-          .select('*, leads(name, email, contact), employees(full_name, email)')
+          .select('*, leads(name, email, contact, client_id, job_id, clients(name), jobs(title)), employees(full_name, email)')
           .eq('company_id', userRole.company_id)
           .order('created_at', { ascending: false })
           .range(from, from + batchSize - 1);
@@ -2475,12 +2488,19 @@ export default function AdminDashboard() {
         const mondayStr = getLocalDateStr(monday);
         const saturdayStr = getLocalDateStr(saturday);
         return callDateStr >= mondayStr && callDateStr <= saturdayStr;
-      } else if (dateFilter === 'week') {
-        // Last 7 days including today
-        const weekAgo = new Date(now);
-        weekAgo.setDate(weekAgo.getDate() - 6);
-        const weekAgoStr = getLocalDateStr(weekAgo);
-        return callDateStr >= weekAgoStr && callDateStr <= todayStr;
+      } else if (dateFilter === 'prevweek') {
+        // Previous week (Monday to Sunday)
+        const dayOfWeek = now.getDay();
+        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        const currentWeekStart = new Date(now);
+        currentWeekStart.setDate(now.getDate() - daysFromMonday);
+        const prevWeekStart = new Date(currentWeekStart);
+        prevWeekStart.setDate(currentWeekStart.getDate() - 7);
+        const prevWeekEnd = new Date(prevWeekStart);
+        prevWeekEnd.setDate(prevWeekStart.getDate() + 6);
+        const prevWeekStartStr = getLocalDateStr(prevWeekStart);
+        const prevWeekEndStr = getLocalDateStr(prevWeekEnd);
+        return callDateStr >= prevWeekStartStr && callDateStr <= prevWeekEndStr;
       } else if (dateFilter === 'month') {
         // Last 30 days including today
         const monthAgo = new Date(now);
@@ -2539,11 +2559,19 @@ export default function AdminDashboard() {
         const mondayStr = getLocalDateStr(monday);
         const saturdayStr = getLocalDateStr(saturday);
         return leadDateStr >= mondayStr && leadDateStr <= saturdayStr;
-      } else if (dateFilter === 'week') {
-        const weekAgo = new Date(now);
-        weekAgo.setDate(weekAgo.getDate() - 6);
-        const weekAgoStr = getLocalDateStr(weekAgo);
-        return leadDateStr >= weekAgoStr && leadDateStr <= todayStr;
+      } else if (dateFilter === 'prevweek') {
+        // Previous week (Monday to Sunday)
+        const dayOfWeek = now.getDay();
+        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        const currentWeekStart = new Date(now);
+        currentWeekStart.setDate(now.getDate() - daysFromMonday);
+        const prevWeekStart = new Date(currentWeekStart);
+        prevWeekStart.setDate(currentWeekStart.getDate() - 7);
+        const prevWeekEnd = new Date(prevWeekStart);
+        prevWeekEnd.setDate(prevWeekStart.getDate() + 6);
+        const prevWeekStartStr = getLocalDateStr(prevWeekStart);
+        const prevWeekEndStr = getLocalDateStr(prevWeekEnd);
+        return leadDateStr >= prevWeekStartStr && leadDateStr <= prevWeekEndStr;
       } else if (dateFilter === 'month') {
         const monthAgo = new Date(now);
         monthAgo.setDate(monthAgo.getDate() - 29);
@@ -2598,13 +2626,22 @@ export default function AdminDashboard() {
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayStr = getLocalDateStr(yesterday);
         return callDateStr === yesterdayStr;
-      } else if (callDateFilter === 'week') {
-        // Last 7 days including today
-        const weekAgo = new Date(now);
-        weekAgo.setDate(weekAgo.getDate() - 6);
-        const weekAgoStr = getLocalDateStr(weekAgo);
-        const todayStr = getLocalDateStr(now);
-        return callDateStr >= weekAgoStr && callDateStr <= todayStr;
+      } else if (callDateFilter === 'prevweek') {
+        // Previous week (Monday to Sunday)
+        const dayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        // Get current week's Monday
+        const currentWeekStart = new Date(now);
+        currentWeekStart.setDate(now.getDate() - daysFromMonday);
+        // Get previous week's Monday
+        const prevWeekStart = new Date(currentWeekStart);
+        prevWeekStart.setDate(currentWeekStart.getDate() - 7);
+        // Get previous week's Sunday (6 days after Monday)
+        const prevWeekEnd = new Date(prevWeekStart);
+        prevWeekEnd.setDate(prevWeekStart.getDate() + 6);
+        const prevWeekStartStr = getLocalDateStr(prevWeekStart);
+        const prevWeekEndStr = getLocalDateStr(prevWeekEnd);
+        return callDateStr >= prevWeekStartStr && callDateStr <= prevWeekEndStr;
       } else if (callDateFilter === 'month') {
         // Last 30 days including today
         const monthAgo = new Date(now);
@@ -2638,6 +2675,14 @@ export default function AdminDashboard() {
       arr = arr.filter(call => call.employee_id === selectedEmployeeFilter);
     }
 
+    if (selectedClientFilter && selectedClientFilter !== 'all') {
+      arr = arr.filter(call => call.leads?.client_id === selectedClientFilter);
+    }
+
+    if (selectedJobFilter && selectedJobFilter !== 'all') {
+      arr = arr.filter(call => call.leads?.job_id === selectedJobFilter);
+    }
+
     if (callSearch && callSearch.trim() !== '') {
       const q = callSearch.trim().toLowerCase();
       arr = arr.filter(call => {
@@ -2648,7 +2693,7 @@ export default function AdminDashboard() {
     }
 
     return arr;
-  }, [callDateFilteredCalls, selectedManagerFilter, selectedEmployeeFilter, callSearch, managers, employees]);
+  }, [callDateFilteredCalls, selectedManagerFilter, selectedEmployeeFilter, selectedClientFilter, selectedJobFilter, callSearch, managers, employees]);
 
   const dateFilteredAnalyses = useMemo(() => {
     const now = new Date();
@@ -2696,12 +2741,19 @@ export default function AdminDashboard() {
         const mondayStr = getLocalDateStr(monday);
         const saturdayStr = getLocalDateStr(saturday);
         return analysisDateStr >= mondayStr && analysisDateStr <= saturdayStr;
-      } else if (dateFilter === 'week') {
-        // Last 7 days including today
-        const weekAgo = new Date(now);
-        weekAgo.setDate(weekAgo.getDate() - 6);
-        const weekAgoStr = getLocalDateStr(weekAgo);
-        return analysisDateStr >= weekAgoStr && analysisDateStr <= todayStr;
+      } else if (dateFilter === 'prevweek') {
+        // Previous week (Monday to Sunday)
+        const dayOfWeek = now.getDay();
+        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        const currentWeekStart = new Date(now);
+        currentWeekStart.setDate(now.getDate() - daysFromMonday);
+        const prevWeekStart = new Date(currentWeekStart);
+        prevWeekStart.setDate(currentWeekStart.getDate() - 7);
+        const prevWeekEnd = new Date(prevWeekStart);
+        prevWeekEnd.setDate(prevWeekStart.getDate() + 6);
+        const prevWeekStartStr = getLocalDateStr(prevWeekStart);
+        const prevWeekEndStr = getLocalDateStr(prevWeekEnd);
+        return analysisDateStr >= prevWeekStartStr && analysisDateStr <= prevWeekEndStr;
       } else if (dateFilter === 'month') {
         // Last 30 days including today
         const monthAgo = new Date(now);
@@ -2741,23 +2793,22 @@ export default function AdminDashboard() {
         weekStart.setDate(now.getDate() - daysFromMonday);
         weekStart.setHours(0, 0, 0, 0);
         const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 5); // Saturday
-        weekEnd.setHours(23, 59, 59, 999);
-        return prodTime >= weekStart.getTime() && prodTime <= weekEnd.getTime();
-      } else if (dateFilter === 'week') {
-        // Get Monday of current week as start
-        const weekStart = new Date(now);
-        const dayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // If Sunday, go back 6 days to Monday
-        weekStart.setDate(now.getDate() - daysFromMonday);
-        weekStart.setHours(0, 0, 0, 0);
-
-        // Get Friday of current week as end
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 4); // Friday is 4 days after Monday
-        weekEnd.setHours(23, 59, 59, 999);
-
-        return prodTime >= weekStart.getTime() && prodTime <= weekEnd.getTime();
+      } else if (dateFilter === 'prevweek') {
+        // Previous week (Monday to Sunday)
+        const dayOfWeek = now.getDay();
+        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        const currentWeekStart = new Date(now);
+        currentWeekStart.setDate(now.getDate() - daysFromMonday);
+        currentWeekStart.setHours(0, 0, 0, 0);
+        
+        const prevWeekStart = new Date(currentWeekStart);
+        prevWeekStart.setDate(currentWeekStart.getDate() - 7);
+        
+        const prevWeekEnd = new Date(prevWeekStart);
+        prevWeekEnd.setDate(prevWeekStart.getDate() + 6);
+        prevWeekEnd.setHours(23, 59, 59, 999);
+        
+        return prodTime >= prevWeekStart.getTime() && prodTime <= prevWeekEnd.getTime();
       } else if (dateFilter === 'month') {
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
         monthStart.setHours(0, 0, 0, 0);
@@ -3009,14 +3060,14 @@ export default function AdminDashboard() {
                         This Week
                       </Button>
                       <Button
-                        variant={dateFilter === 'week' ? 'default' : 'outline'}
+                        variant={dateFilter === 'prevweek' ? 'default' : 'outline'}
                         size="sm"
                         onClick={() => {
-                          setDateFilter('week');
+                          setDateFilter('prevweek');
                           setShowCustomDatePicker(false);
                         }}
                       >
-                        Last 7 Days
+                        Previous Week
                       </Button>
                       <Button
                         variant={dateFilter === 'month' ? 'default' : 'outline'}
@@ -3040,6 +3091,53 @@ export default function AdminDashboard() {
                         Custom Range
                       </Button>
                     </div>
+                  </div>
+
+                  {/* Date Range Display */}
+                  <div className="mt-3 text-sm text-gray-600">
+                    {(() => {
+                      const now = new Date();
+                      const getLocalDateStr = (date: Date) => {
+                        const year = date.getFullYear();
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        const day = String(date.getDate()).padStart(2, '0');
+                        return `${year}-${month}-${day}`;
+                      };
+
+                      if (dateFilter === 'today') {
+                        return `Date Range: ${format(now, 'MMM dd, yyyy')} (Today)`;
+                      } else if (dateFilter === 'yesterday') {
+                        const yesterday = new Date(now);
+                        yesterday.setDate(yesterday.getDate() - 1);
+                        return `Date Range: ${format(yesterday, 'MMM dd, yyyy')} (Yesterday)`;
+                      } else if (dateFilter === 'thisWeek') {
+                        const dayOfWeek = now.getDay();
+                        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+                        const weekStart = new Date(now);
+                        weekStart.setDate(now.getDate() - daysFromMonday);
+                        const weekEnd = new Date(weekStart);
+                        weekEnd.setDate(weekStart.getDate() + 5);
+                        return `Date Range: ${format(weekStart, 'MMM dd')} - ${format(weekEnd, 'MMM dd, yyyy')} (This Week)`;
+                      } else if (dateFilter === 'prevweek') {
+                        const dayOfWeek = now.getDay();
+                        const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+                        const currentWeekStart = new Date(now);
+                        currentWeekStart.setDate(now.getDate() - daysFromMonday);
+                        const prevWeekStart = new Date(currentWeekStart);
+                        prevWeekStart.setDate(currentWeekStart.getDate() - 7);
+                        const prevWeekEnd = new Date(prevWeekStart);
+                        prevWeekEnd.setDate(prevWeekStart.getDate() + 6);
+                        return `Date Range: ${format(prevWeekStart, 'MMM dd')} - ${format(prevWeekEnd, 'MMM dd, yyyy')} (Previous Week)`;
+                      } else if (dateFilter === 'month') {
+                        const monthAgo = new Date(now);
+                        monthAgo.setDate(monthAgo.getDate() - 29);
+                        return `Date Range: ${format(monthAgo, 'MMM dd')} - ${format(now, 'MMM dd, yyyy')} (This Month)`;
+                      } else if (dateFilter === 'custom' && customDateRange.startDate && customDateRange.endDate) {
+                        return `Date Range: ${format(new Date(customDateRange.startDate), 'MMM dd, yyyy')} - ${format(new Date(customDateRange.endDate), 'MMM dd, yyyy')}`;
+                      } else {
+                        return 'Date Range: All Time';
+                      }
+                    })()}
                   </div>
 
                   {/* Custom Date Range Picker */}
@@ -3094,7 +3192,7 @@ export default function AdminDashboard() {
 
               {/* Top Stats */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <Card className="bg-white shadow-sm">
+                <Card className="bg-white shadow-sm cursor-pointer hover:shadow-lg hover:bg-blue-50 transition-all" onClick={() => setActiveSidebarItem('managers')}>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium text-gray-600">Total Managers</CardTitle>
                     <Users className="h-5 w-5 text-blue-500" />
@@ -3104,7 +3202,7 @@ export default function AdminDashboard() {
                   </CardContent>
                 </Card>
 
-                <Card className="bg-white shadow-sm">
+                <Card className="bg-white shadow-sm cursor-pointer hover:shadow-lg hover:bg-red-50 transition-all" onClick={() => setActiveSidebarItem('employees')}>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium text-gray-600">Total Employees</CardTitle>
                     <UserPlus className="h-5 w-5 text-red-500" />
@@ -3114,7 +3212,7 @@ export default function AdminDashboard() {
                   </CardContent>
                 </Card>
 
-                <Card className="bg-white shadow-sm">
+                <Card className="bg-white shadow-sm cursor-pointer hover:shadow-lg hover:bg-pink-50 transition-all" onClick={() => setActiveSidebarItem('leads')}>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium text-gray-600">Total Leads</CardTitle>
                     <Phone className="h-5 w-5 text-pink-500" />
@@ -3124,7 +3222,7 @@ export default function AdminDashboard() {
                   </CardContent>
                 </Card>
 
-                <Card className="bg-white shadow-sm">
+                <Card className="bg-white shadow-sm cursor-pointer hover:shadow-lg hover:bg-violet-50 transition-all" onClick={() => setActiveSidebarItem('call-history')}>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium text-gray-600">Total Calls</CardTitle>
                     <PhoneCall className="h-5 w-5 text-violet-500" />
@@ -3141,7 +3239,7 @@ export default function AdminDashboard() {
 
               {/* Additional Stats Row */}
               <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200 shadow-sm">
+                <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200 shadow-sm cursor-pointer hover:shadow-lg transition-all" onClick={() => setActiveSidebarItem('call-history')}>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium text-gray-700">Success Rate</CardTitle>
                     <CheckCircle className="h-5 w-5 text-green-600" />
@@ -3156,7 +3254,7 @@ export default function AdminDashboard() {
                   </CardContent>
                 </Card>
 
-                <Card className="bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200 shadow-sm">
+                <Card className="bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200 shadow-sm cursor-pointer hover:shadow-lg transition-all" onClick={() => setActiveSidebarItem('call-history')}>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium text-gray-700">Avg Call Duration</CardTitle>
                     <Clock className="h-5 w-5 text-purple-600" />
@@ -3179,7 +3277,7 @@ export default function AdminDashboard() {
                   </CardContent>
                 </Card>
 
-                <Card className="bg-gradient-to-br from-orange-50 to-orange-100 border-orange-200 shadow-sm">
+                <Card className="bg-gradient-to-br from-orange-50 to-orange-100 border-orange-200 shadow-sm cursor-pointer hover:shadow-lg transition-all" onClick={() => setActiveSidebarItem('clients')}>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium text-gray-700">Active Clients</CardTitle>
                     <Building className="h-5 w-5 text-orange-600" />
@@ -3190,7 +3288,7 @@ export default function AdminDashboard() {
                   </CardContent>
                 </Card>
 
-                <Card className="bg-gradient-to-br from-cyan-50 to-cyan-100 border-cyan-200 shadow-sm">
+                <Card className="bg-gradient-to-br from-cyan-50 to-cyan-100 border-cyan-200 shadow-sm cursor-pointer hover:shadow-lg transition-all" onClick={() => setActiveSidebarItem('jobs')}>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium text-gray-700">Total Jobs</CardTitle>
                     <Briefcase className="h-5 w-5 text-cyan-600" />
@@ -3201,7 +3299,7 @@ export default function AdminDashboard() {
                   </CardContent>
                 </Card>
 
-                <Card className="bg-gradient-to-br from-yellow-50 to-yellow-100 border-yellow-200 shadow-sm">
+                <Card className="bg-gradient-to-br from-yellow-50 to-yellow-100 border-yellow-200 shadow-sm cursor-pointer hover:shadow-lg transition-all" onClick={() => setActiveSidebarItem('leads')}>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium text-gray-700">Lead Groups</CardTitle>
                     <Users className="h-5 w-5 text-yellow-600" />
@@ -3741,7 +3839,7 @@ export default function AdminDashboard() {
               <Card className="bg-white shadow-sm">
                 <CardHeader>
                   <CardTitle className="text-base font-semibold">
-                    Top Performers - {dateFilter === 'today' ? 'Today' : dateFilter === 'yesterday' ? 'Yesterday' : dateFilter === 'week' ? 'Last 7 Days' : dateFilter === 'month' ? 'This Month' : 'Custom Range'}
+                    Top Performers - {dateFilter === 'today' ? 'Today' : dateFilter === 'yesterday' ? 'Yesterday' : dateFilter === 'thisWeek' ? 'This Week' : dateFilter === 'prevweek' ? 'Previous Week' : dateFilter === 'month' ? 'This Month' : 'Custom Range'}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -3962,49 +4060,51 @@ export default function AdminDashboard() {
                               className="pl-10 w-64"
                             />
                           </div>
-                          {company?.industry?.toLowerCase() === 'hr' && (
-                            <>
-                              <Select
-                                value={selectedClientFilter}
-                                onValueChange={setSelectedClientFilter}
-                              >
-                                <SelectTrigger className="w-48">
-                                  <SelectValue placeholder="Filter by Client" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="all">All Clients</SelectItem>
-                                  {Array.from(new Set(leads.filter(l => l.client_id).map(l => l.client_id))).map((clientId) => {
-                                    const client = clients?.find(c => c.id === clientId);
-                                    return client ? (
-                                      <SelectItem key={clientId} value={clientId}>
-                                        {client.name}
-                                      </SelectItem>
-                                    ) : null;
-                                  })}
-                                </SelectContent>
-                              </Select>
-                              <Select
-                                value={selectedJobFilter}
-                                onValueChange={setSelectedJobFilter}
-                              >
-                                <SelectTrigger className="w-48">
-                                  <SelectValue placeholder="Filter by Job" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="all">All Jobs</SelectItem>
-                                  {Array.from(new Set(leads.filter(l => l.job_id).map(l => l.job_id))).filter(Boolean).map((jobId) => {
-                                    const job = jobs?.find(j => j.id === jobId);
-                                    const jobTitle = job?.title || jobId;
-                                    return (
-                                      <SelectItem key={jobId} value={jobId}>
-                                        {jobTitle}
-                                      </SelectItem>
-                                    );
-                                  })}
-                                </SelectContent>
-                              </Select>
-                            </>
-                          )}
+                          <Select
+                            value={selectedClientFilter}
+                            onValueChange={setSelectedClientFilter}
+                          >
+                            <SelectTrigger className="w-48">
+                              <SelectValue placeholder="Filter by Client" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Clients</SelectItem>
+                              {Array.from(new Set(leads.filter(l => l.client_id).map(l => l.client_id))).map((clientId) => {
+                                const client = clients?.find(c => c.id === clientId);
+                                return client ? (
+                                  <SelectItem key={clientId} value={clientId}>
+                                    {client.name}
+                                  </SelectItem>
+                                ) : null;
+                              })}
+                            </SelectContent>
+                          </Select>
+                          <Select
+                            value={selectedJobFilter}
+                            onValueChange={setSelectedJobFilter}
+                            disabled={selectedClientFilter === 'all'}
+                          >
+                            <SelectTrigger className={`w-48 ${selectedClientFilter === 'all' ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                              <SelectValue placeholder={selectedClientFilter === 'all' ? 'Select client first' : 'Filter by Job'} />
+                            </SelectTrigger>
+                            {selectedClientFilter !== 'all' && (
+                              <SelectContent>
+                                <SelectItem value="all">All Jobs</SelectItem>
+                                {Array.from(new Set(leads.filter(l => {
+                                  const matchesClient = selectedClientFilter === 'all' || l.client_id === selectedClientFilter;
+                                  return matchesClient && l.job_id;
+                                }).map(l => l.job_id))).filter(Boolean).map((jobId) => {
+                                  const job = jobs?.find(j => j.id === jobId);
+                                  const jobTitle = job?.title || jobId;
+                                  return (
+                                    <SelectItem key={jobId} value={jobId}>
+                                      {jobTitle}
+                                    </SelectItem>
+                                  );
+                                })}
+                              </SelectContent>
+                            )}
+                          </Select>
                           <Select
                             value={selectedEmployeeFilter}
                             onValueChange={setSelectedEmployeeFilter}
@@ -4537,7 +4637,7 @@ export default function AdminDashboard() {
                       <SelectItem value="all">All Time</SelectItem>
                       <SelectItem value="today">Today</SelectItem>
                       <SelectItem value="yesterday">Yesterday</SelectItem>
-                      <SelectItem value="week">Last 7 days</SelectItem>
+                      <SelectItem value="prevweek">Previous Week</SelectItem>
                       <SelectItem value="month">Last 30 days</SelectItem>
                     </SelectContent>
                   </Select>
@@ -4619,6 +4719,153 @@ export default function AdminDashboard() {
                     </SelectContent>
                   </Select>
 
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="w-[220px] justify-between">
+                        <span className="truncate">
+                          {selectedClientFilter === 'all' ? 'All Clients' : 
+                            callDateFilteredCalls.find(c => c.leads?.client_id === selectedClientFilter)?.clients?.name ||
+                            callDateFilteredCalls.find(c => c.leads?.client_id === selectedClientFilter)?.leads?.client_name ||
+                            `Client ${selectedClientFilter.substring(0, 8)}`}
+                        </span>
+                        <ChevronDown className="h-4 w-4 opacity-50 ml-2" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[220px] p-0">
+                      <div className="p-3 border-b">
+                        <Input 
+                          placeholder="Search clients..." 
+                          value={clientFilterSearch}
+                          onChange={(e) => setClientFilterSearch(e.target.value)}
+                          className="h-8"
+                        />
+                      </div>
+                      <div className="max-h-[200px] overflow-y-auto">
+                        <button
+                          onClick={() => {
+                            setSelectedClientFilter('all');
+                            setClientFilterSearch('');
+                          }}
+                          className={`w-full text-left px-3 py-2 text-sm hover:bg-accent ${
+                            selectedClientFilter === 'all' ? 'bg-accent font-semibold' : ''
+                          }`}
+                        >
+                          All Clients
+                        </button>
+                        {(() => {
+                          const clientsInCalls = new Map();
+                          callDateFilteredCalls.forEach(call => {
+                            if (call.leads?.client_id) {
+                              clientsInCalls.set(call.leads.client_id, call.leads);
+                            }
+                          });
+                          
+                          const clientList = Array.from(clientsInCalls.values()).map(lead => ({
+                            id: lead.client_id,
+                            name: (typeof lead.clients === 'object' && lead.clients?.name) 
+                              ? lead.clients.name 
+                              : lead.client_name || `Client ${lead.client_id?.substring(0, 8)}`
+                          }));
+
+                          return clientList
+                            .filter(c => c.name.toLowerCase().includes(clientFilterSearch.toLowerCase()))
+                            .map(client => (
+                              <button
+                                key={client.id}
+                                onClick={() => {
+                                  setSelectedClientFilter(client.id);
+                                  setClientFilterSearch('');
+                                }}
+                                className={`w-full text-left px-3 py-2 text-sm hover:bg-accent ${
+                                  selectedClientFilter === client.id ? 'bg-accent font-semibold' : ''
+                                }`}
+                              >
+                                {client.name}
+                              </button>
+                            ));
+                        })()}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button 
+                        variant="outline" 
+                        className={`w-[220px] justify-between ${selectedClientFilter === 'all' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        disabled={selectedClientFilter === 'all'}
+                      >
+                        <span className="truncate">
+                          {selectedClientFilter === 'all' ? 'Select client first' :
+                            selectedJobFilter === 'all' ? 'All Jobs' : 
+                            callDateFilteredCalls.find(c => c.leads?.job_id === selectedJobFilter)?.jobs?.title ||
+                            callDateFilteredCalls.find(c => c.leads?.job_id === selectedJobFilter)?.leads?.job_title ||
+                            `Job ${selectedJobFilter.substring(0, 8)}`}
+                        </span>
+                        <ChevronDown className="h-4 w-4 opacity-50 ml-2" />
+                      </Button>
+                    </PopoverTrigger>
+                    {selectedClientFilter !== 'all' && (
+                      <PopoverContent className="w-[220px] p-0">
+                        <div className="p-3 border-b">
+                          <Input 
+                            placeholder="Search jobs..." 
+                            value={jobFilterSearch}
+                            onChange={(e) => setJobFilterSearch(e.target.value)}
+                            className="h-8"
+                          />
+                        </div>
+                        <div className="max-h-[200px] overflow-y-auto">
+                          <button
+                            onClick={() => {
+                              setSelectedJobFilter('all');
+                              setJobFilterSearch('');
+                            }}
+                            className={`w-full text-left px-3 py-2 text-sm hover:bg-accent ${
+                              selectedJobFilter === 'all' ? 'bg-accent font-semibold' : ''
+                            }`}
+                          >
+                            All Jobs
+                          </button>
+                          {(() => {
+                            const jobsInCalls = new Map();
+                            callDateFilteredCalls.forEach(call => {
+                              // Only include jobs from the selected client (if a client is selected)
+                              const isClientMatch = selectedClientFilter === 'all' || call.leads?.client_id === selectedClientFilter;
+                              if (isClientMatch && call.leads?.job_id) {
+                                jobsInCalls.set(call.leads.job_id, call.leads);
+                              }
+                            });
+                            
+                            const jobList = Array.from(jobsInCalls.values()).map(lead => ({
+                              id: lead.job_id,
+                              name: (typeof lead.jobs === 'object' && lead.jobs?.title) 
+                                ? lead.jobs.title 
+                                : lead.job_title || `Job ${lead.job_id?.substring(0, 8)}`
+                            }));
+
+                            return jobList
+                              .filter(j => j.name.toLowerCase().includes(jobFilterSearch.toLowerCase()))
+                              .map(job => (
+                                <button
+                                  key={job.id}
+                                  onClick={() => {
+                                    setSelectedJobFilter(job.id);
+                                    setJobFilterSearch('');
+                                  }}
+                                  className={`w-full text-left px-3 py-2 text-sm hover:bg-accent ${
+                                    selectedJobFilter === job.id ? 'bg-accent font-semibold' : ''
+                                  }`}
+                                >
+                                  {job.name}
+                                </button>
+                              ));
+                          })()}
+                        </div>
+                      </PopoverContent>
+                    )}
+                  </Popover>
+
                   <Input
                     className="w-[260px]"
                     placeholder="Search lead or phone"
@@ -4646,6 +4893,63 @@ export default function AdminDashboard() {
                       <SelectItem value="asc">Assending</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                {/* Date Range Display */}
+                <div className="mt-3 text-sm text-gray-600">
+                  {(() => {
+                    const now = new Date();
+                    const getLocalDateStr = (date: Date) => {
+                      const year = date.getFullYear();
+                      const month = String(date.getMonth() + 1).padStart(2, '0');
+                      const day = String(date.getDate()).padStart(2, '0');
+                      return `${year}-${month}-${day}`;
+                    };
+
+                    let dateRange = '';
+                    if (selectedCallDate) {
+                      dateRange = `Date Range: ${format(selectedCallDate, 'MMM dd, yyyy')}`;
+                    } else if (callDateFilter === 'today') {
+                      dateRange = `Date Range: ${format(now, 'MMM dd, yyyy')} (Today)`;
+                    } else if (callDateFilter === 'yesterday') {
+                      const yesterday = new Date(now);
+                      yesterday.setDate(yesterday.getDate() - 1);
+                      dateRange = `Date Range: ${format(yesterday, 'MMM dd, yyyy')} (Yesterday)`;
+                    } else if (callDateFilter === 'prevweek') {
+                      const dayOfWeek = now.getDay();
+                      const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+                      const currentWeekStart = new Date(now);
+                      currentWeekStart.setDate(now.getDate() - daysFromMonday);
+                      const prevWeekStart = new Date(currentWeekStart);
+                      prevWeekStart.setDate(currentWeekStart.getDate() - 7);
+                      const prevWeekEnd = new Date(prevWeekStart);
+                      prevWeekEnd.setDate(prevWeekStart.getDate() + 6);
+                      dateRange = `Date Range: ${format(prevWeekStart, 'MMM dd')} - ${format(prevWeekEnd, 'MMM dd, yyyy')} (Previous Week)`;
+                    } else if (callDateFilter === 'month') {
+                      const monthAgo = new Date(now);
+                      monthAgo.setDate(monthAgo.getDate() - 29);
+                      dateRange = `Date Range: ${format(monthAgo, 'MMM dd')} - ${format(now, 'MMM dd, yyyy')} (Last 30 days)`;
+                    } else {
+                      dateRange = 'Date Range: All Time';
+                    }
+
+                    // Add client and job info
+                    let filters = dateRange;
+                    if (selectedClientFilter !== 'all') {
+                      const clientName = callDateFilteredCalls.find(c => c.leads?.client_id === selectedClientFilter)?.clients?.name || 
+                                        callDateFilteredCalls.find(c => c.leads?.client_id === selectedClientFilter)?.leads?.client_name ||
+                                        `Client ${selectedClientFilter.substring(0, 8)}`;
+                      filters += ` | Client: ${clientName}`;
+                    }
+                    if (selectedJobFilter !== 'all') {
+                      const jobName = callDateFilteredCalls.find(c => c.leads?.job_id === selectedJobFilter)?.jobs?.title || 
+                                     callDateFilteredCalls.find(c => c.leads?.job_id === selectedJobFilter)?.leads?.job_title ||
+                                     `Job ${selectedJobFilter.substring(0, 8)}`;
+                      filters += ` | Job: ${jobName}`;
+                    }
+
+                    return filters;
+                  })()}
                 </div>
               </div>
 
@@ -4730,6 +5034,8 @@ export default function AdminDashboard() {
                     <TableRow className="bg-gray-50">
                       <TableHead className="font-semibold">Name</TableHead>
                       <TableHead className="font-semibold">Phone</TableHead>
+                      <TableHead className="font-semibold">Client</TableHead>
+                      <TableHead className="font-semibold">Job</TableHead>
                       <TableHead className="font-semibold">Date</TableHead>
                       <TableHead className="font-semibold">Duration</TableHead>
                       <TableHead className="font-semibold">Disposition</TableHead>
@@ -4853,6 +5159,12 @@ export default function AdminDashboard() {
                             </TableCell>
                             <TableCell className="text-gray-600">
                               {call.leads?.contact || 'N/A'}
+                            </TableCell>
+                            <TableCell className="text-gray-600">
+                              {call.leads?.clients?.name || call.leads?.client_name || 'N/A'}
+                            </TableCell>
+                            <TableCell className="text-gray-600">
+                              {call.leads?.jobs?.title || call.leads?.job_title || 'N/A'}
                             </TableCell>
                             <TableCell className="text-gray-600">
                               <div>
@@ -5402,11 +5714,11 @@ export default function AdminDashboard() {
                               This Week
                             </Button>
                             <Button 
-                              variant={teamPerfDateFilter === 'week' ? 'default' : 'outline'}
+                              variant={teamPerfDateFilter === 'prevweek' ? 'default' : 'outline'}
                               size="sm"
-                              onClick={() => setTeamPerfDateFilter('week')}
+                              onClick={() => setTeamPerfDateFilter('prevweek')}
                             >
-                              Last 7 Days
+                              Previous Week
                             </Button>
                             <Button 
                               variant={teamPerfDateFilter === 'month' ? 'default' : 'outline'}
@@ -5423,6 +5735,49 @@ export default function AdminDashboard() {
                               Custom Range
                             </Button>
                           </div>
+                        </div>
+
+                        {/* Date Range Display */}
+                        <div className="mt-3 text-sm text-gray-600">
+                          {(() => {
+                            const now = new Date();
+                            
+                            if (teamPerfDateFilter === 'today') {
+                              return `Date Range: ${format(now, 'MMM dd, yyyy')} (Today)`;
+                            } else if (teamPerfDateFilter === 'yesterday') {
+                              const yesterday = new Date(now);
+                              yesterday.setDate(yesterday.getDate() - 1);
+                              return `Date Range: ${format(yesterday, 'MMM dd, yyyy')} (Yesterday)`;
+                            } else if (teamPerfDateFilter === 'thisWeek') {
+                              const dayOfWeek = now.getDay();
+                              const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+                              const weekStart = new Date(now);
+                              weekStart.setDate(now.getDate() - daysFromMonday);
+                              const weekEnd = new Date(weekStart);
+                              weekEnd.setDate(weekStart.getDate() + 6);
+                              return `Date Range: ${format(weekStart, 'MMM dd')} - ${format(weekEnd, 'MMM dd, yyyy')} (This Week)`;
+                            } else if (teamPerfDateFilter === 'prevweek') {
+                              const dayOfWeek = now.getDay();
+                              const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+                              const currentWeekStart = new Date(now);
+                              currentWeekStart.setDate(now.getDate() - daysFromMonday);
+                              const prevWeekStart = new Date(currentWeekStart);
+                              prevWeekStart.setDate(currentWeekStart.getDate() - 7);
+                              const prevWeekEnd = new Date(prevWeekStart);
+                              prevWeekEnd.setDate(prevWeekStart.getDate() + 6);
+                              return `Date Range: ${format(prevWeekStart, 'MMM dd')} - ${format(prevWeekEnd, 'MMM dd, yyyy')} (Previous Week)`;
+                            } else if (teamPerfDateFilter === 'month') {
+                              const monthAgo = new Date(now);
+                              monthAgo.setDate(monthAgo.getDate() - 29);
+                              return `Date Range: ${format(monthAgo, 'MMM dd')} - ${format(now, 'MMM dd, yyyy')} (This Month)`;
+                            } else if (teamPerfDateFilter === 'custom') {
+                              if (teamPerfCustomStartDate && teamPerfCustomEndDate) {
+                                return `Date Range: ${format(new Date(teamPerfCustomStartDate), 'MMM dd, yyyy')} - ${format(new Date(teamPerfCustomEndDate), 'MMM dd, yyyy')} (Custom)`;
+                              }
+                              return 'Date Range: Select dates';
+                            }
+                            return 'Date Range: All Time';
+                          })()}
                         </div>
 
                         {/* Custom Date Range */}
@@ -5543,17 +5898,23 @@ export default function AdminDashboard() {
                                     return dateUTC === yesterdayUTC;
                                   
                                   case 'thisWeek': {
-                                    // Current week Monday to Saturday
+                                    // Current week Monday to Sunday
                                     const dayOfWeek = now.getDay();
                                     const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
                                     const mondayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysFromMonday);
-                                    const saturdayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysFromMonday + 5);
-                                    return dateUTC >= mondayUTC && dateUTC <= saturdayUTC;
+                                    const sundayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysFromMonday + 6);
+                                    return dateUTC >= mondayUTC && dateUTC <= sundayUTC;
                                   }
                                   
-                                  case 'week':
-                                    const weekAgoUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6);
-                                    return dateUTC >= weekAgoUTC && dateUTC <= nowUTC;
+                                  case 'prevweek': {
+                                    // Previous week (Monday to Sunday)
+                                    const dayOfWeek = now.getDay();
+                                    const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+                                    const currentWeekMondayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysFromMonday);
+                                    const prevWeekMondayUTC = currentWeekMondayUTC - (7 * 24 * 60 * 60 * 1000);
+                                    const prevWeekSundayUTC = prevWeekMondayUTC + (6 * 24 * 60 * 60 * 1000);
+                                    return dateUTC >= prevWeekMondayUTC && dateUTC <= prevWeekSundayUTC;
+                                  }
                                   
                                   case 'month':
                                     const monthAgoUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 29);

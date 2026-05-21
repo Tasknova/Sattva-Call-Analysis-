@@ -14,11 +14,20 @@ const Index = () => {
   const { user, userRole, company, loading: authLoading } = useAuth();
   const [currentView, setCurrentView] = useState<ViewType>('login-options');
   const [searchParams] = useSearchParams();
+  const [initialTab, setInitialTab] = useState<string | null>(null);
+  const [jobFilterId, setJobFilterId] = useState<string | null>(null);
 
   // Check if we should show dashboard based on URL parameters
   useEffect(() => {
     const tab = searchParams.get('tab');
-    if (tab && user) {
+    const jobFilter = searchParams.get('jobFilter');
+    if (tab) {
+      setInitialTab(tab);
+      if (jobFilter) {
+        setJobFilterId(jobFilter);
+      }
+    }
+    if ((tab || jobFilter) && user) {
       setCurrentView('dashboard');
     }
   }, [searchParams, user]);
@@ -131,7 +140,7 @@ const Index = () => {
       return <ProfilePage onBack={handleBackToDashboard} />;
     
     case 'dashboard':
-      return <Dashboard onShowProfile={handleShowProfile} />;
+      return <Dashboard onShowProfile={handleShowProfile} initialTab={initialTab || undefined} jobFilterId={jobFilterId || undefined} />;
     
     default:
       return (
